@@ -8,134 +8,34 @@
   --background-end-rgb: 30, 58, 138;
 }
 
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
 body {
-  color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-    to bottom right,
-    rgb(var(--background-start-rgb)),
-    rgb(var(--background-end-rgb))
-  );
-  min-height: 100vh;
+  max-width: 100vw;
+  overflow-x: hidden;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    "Noto Sans", sans-serif;
 }
 
-.glass {
-  backdrop-filter: blur(8px);
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.card {
-  border-radius: 1rem;
-  padding: 1.5rem;
-}
-
-.btn-gradient {
-  background: linear-gradient(to right, #9333ea, #ec4899);
+body {
   color: white;
-  font-weight: 600;
-  padding: 1rem 2rem;
-  border-radius: 9999px;
-  font-size: 1.125rem;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-  transition: all 300ms;
+  background: #0f0f23;
 }
 
-.btn-gradient:hover {
-  background: linear-gradient(to right, #7e22ce, #db2777);
-  transform: scale(1.05);
+a {
+  color: inherit;
+  text-decoration: none;
 }
 
-.btn-spotify {
-  background: linear-gradient(to right, #22c55e, #16a34a);
-  color: white;
-  font-weight: 600;
-  padding: 1rem 2rem;
-  border-radius: 9999px;
-  font-size: 1.125rem;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-  transition: all 300ms;
-}
-
-.btn-spotify:hover {
-  background: linear-gradient(to right, #16a34a, #15803d);
-  transform: scale(1.05);
-}
-
-.text-gradient {
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  background-image: linear-gradient(to right, #ec4899, #9333ea, #3b82f6);
-}
-
-@layer base {
-  * {
-    @apply box-border p-0 m-0;
-  }
-
-  html,
-  body {
-    @apply max-w-full overflow-x-hidden;
-    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-      "Noto Sans", sans-serif;
-  }
-
-  body {
-    @apply min-h-screen text-white;
-    background: linear-gradient(to bottom right, rgb(var(--background-start-rgb)), rgb(var(--background-end-rgb)));
-  }
-
-  a {
-    @apply text-inherit no-underline;
-  }
-}
-
-@layer components {
-  .glass {
-    @apply backdrop-blur-sm bg-white/10 border border-white/20;
-  }
-
-  .card {
-    @apply rounded-2xl p-6 glass;
-  }
-
-  .btn-gradient {
-    @apply bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 
-           text-white font-semibold py-4 px-8 rounded-full text-lg shadow-lg transition-all duration-300 hover:scale-105;
-  }
-
-  .btn-spotify {
-    @apply bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 
-           text-white font-semibold py-4 px-8 rounded-full text-lg shadow-lg transition-all duration-300 hover:scale-105;
-  }
-
-  .text-gradient {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500;
-  }
-}
-
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
-}
-
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  @apply w-2;
-}
-
-::-webkit-scrollbar-track {
-  @apply bg-white/10 rounded;
-}
-
-::-webkit-scrollbar-thumb {
-  @apply bg-purple-500/50 rounded hover:bg-purple-500/70;
-}
-
-/* Animations */
+/* Smooth animations */
 @keyframes float {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0px);
   }
   50% {
@@ -147,28 +47,36 @@ body {
   animation: float 3s ease-in-out infinite;
 }
 
-/* Gradient text */
-.text-gradient {
-  @apply bg-clip-text text-transparent bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400;
-}
-
-/* Glass effect */
-.glass {
-  @apply backdrop-blur-sm bg-white/10 border border-white/20;
-}
-
-/* Button hover effects */
-.hover-scale {
-  @apply transition-transform duration-300 hover:scale-105;
-}
-
-/* Card styles */
-.card {
-  @apply rounded-2xl p-6 glass;
-}
-
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
+/* Custom pulse for gradient text */
+@keyframes gradient-pulse {
+  0%,
+  100% {
+    opacity: 1;
   }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+.animate-gradient-pulse {
+  animation: gradient-pulse 2s ease-in-out infinite;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(168, 85, 247, 0.5);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(168, 85, 247, 0.7);
 }
