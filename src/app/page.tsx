@@ -71,11 +71,11 @@ export default function Home() {
           {/* Subtle Grid Pattern */}
           <div
             className="absolute inset-0 opacity-5"
-            style={{
+          style={{
               backgroundImage: `url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23ffffff' fillOpacity='0.1'%3E%3Ccircle cx='20' cy='20' r='1'/%3E%3C/g%3E%3C/svg%3E")`,
-            }}
-          ></div>
-        </div>
+          }}
+        ></div>
+      </div>
 
         {/* Main Content */}
         <div className="relative z-10 text-center max-w-4xl mx-auto px-6">
@@ -98,7 +98,7 @@ export default function Home() {
               <span className="bg-gradient-to-r from-purple-400 via-pink-400 to-blue-400 bg-clip-text text-transparent">
                 Artist ?
               </span>
-            </h1>
+          </h1>
             <div className="w-32 h-1 bg-gradient-to-r from-purple-500 to-pink-500 mx-auto rounded-full animate-pulse"></div>
           </div>
 
@@ -122,23 +122,23 @@ export default function Home() {
               <div className="relative flex items-center gap-2 sm:gap-3 md:gap-4">
                 <div className="w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 bg-white rounded-full flex items-center justify-center">
                   <Play className="w-3 h-3 sm:w-3.5 sm:h-3.5 md:w-4 md:h-4 text-green-500 fill-current ml-0.5" />
-                </div>
+        </div>
                 <span>Connect with Spotify</span>
                 {isHovered && <Sparkles className="hidden sm:block w-4 h-4 sm:w-4.5 sm:h-4.5 md:w-5 md:h-5 animate-spin" />}
-              </div>
+            </div>
             </button>
           </div>
 
           {/* Description */}
           <p className="text-xs sm:text-sm md:text-base text-gray-400 max-w-xs sm:max-w-sm md:max-w-xl mx-auto leading-relaxed opacity-80 px-4">
             Connect with Spotify and let AI transform your music taste into a unique artist identity, complete with personalized aesthetics and vibes.
-          </p>
-        </div>
+            </p>
+          </div>
 
         {/* Floating Music Icons */}
         <div className="absolute top-1/4 left-12 text-white/20 animate-float">
           <Music className="w-5 h-5" />
-        </div>
+          </div>
         <div className="absolute bottom-1/3 right-12 text-white/20 animate-pulse">
           <Music className="w-3 h-3" />
         </div>
@@ -157,9 +157,9 @@ export default function Home() {
           >
             Try Again
           </button>
-        </div>
       </div>
-    );
+    </div>
+  );
   }
 
   return profile ? (
