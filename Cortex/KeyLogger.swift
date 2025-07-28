@@ -3,15 +3,32 @@ import FirebaseFirestore
 import FirebaseCore
 
 class KeyLogger: ObservableObject {
-    private var eventMonitor: Any?
-    private var db: Firestore?
+    private var globalMonitor: Any?
     private var currentBuffer = ""
+    private var lastActivityTime = Date()
+    private var typingTimer: Timer?
     
-    // Callbacks for UI updates
+    // Callbacks
     var onBufferUpdate: ((String) -> Void)?
     var onTextSaved: ((String) -> Void)?
     var onError: ((String) -> Void)?
-
+    var onTypingStarted: (() -> Void)?
+    var onTypingStopped: (() -> Void)?
+    
+    private lazy var db: Firestore? = {
+        guard FirebaseApp.app() != nil else { return nil }
+        return Firestore.firestore()
+    }()
+    
+    init() {
+        print("🔍 KeyLogger initialized")
+        setupNotificationObservers()
+    }
+    
+    private func setupNotificationObservers() {
+        // No observer for AddMemoryToInput here. Only AppDelegate should handle it.
+    }
+    
     func startLogging() {
         // Ensure Firebase is configured
         guard FirebaseApp.app() != nil else {
@@ -23,68 +40,95 @@ class KeyLogger: ObservableObject {
         }
         
         // Initialize Firestore
-        db = Firestore.firestore()
+        // db = Firestore.firestore() // This line is now handled by the lazy var
         
         // Remove any existing observer first
         NotificationCenter.default.removeObserver(self, name: NSNotification.Name("AddMemoryToInput"), object: nil)
         
-        // Listen for memory insertion notifications
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(addMemoryToBuffer),
-            name: NSNotification.Name("AddMemoryToInput"),
-            object: nil
-        )
-        
-        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self = self, let characters = event.characters else { return }
 
+        
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self, let characters = event.characters else { return }
+            
+            // Update activity time
+            self.lastActivityTime = Date()
+            
+            // Notify typing started
+            DispatchQueue.main.async {
+                self.onTypingStarted?()
+            }
+            
+            // Reset typing timer
+            self.typingTimer?.invalidate()
+            self.typingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.onTypingStopped?()
+                }
+            }
+            
+            // Handle special keys
             for character in characters {
                 if character == "\r" || character == "\n" { // Enter key
-                    self.saveBuffer()
+                    if !self.currentBuffer.isEmpty {
+                        self.saveBuffer()
+                    }
                 } else if character == "\u{8}" { // Backspace
                     if !self.currentBuffer.isEmpty {
                         self.currentBuffer.removeLast()
                     }
+                } else if character == "\u{1B}" { // Escape key
+                    // Don't capture escape
+                    continue
+                } else if character == "\u{9}" { // Tab key
+                    // Don't capture tab
+                    continue
+                } else if character == "\u{7F}" { // Delete key
+                    if !self.currentBuffer.isEmpty {
+                        self.currentBuffer.removeLast()
+                    }
                 } else {
-                    self.currentBuffer.append(character)
+                    // Only add printable characters and spaces
+                    if character.isLetter || character.isNumber || character.isPunctuation || character.isSymbol || character == " " {
+                        self.currentBuffer.append(character)
+                    }
                 }
             }
             
-            // Update UI with current buffer
-            DispatchQueue.main.async { [weak self] in
-                self?.onBufferUpdate?(self?.currentBuffer ?? "")
+            // Update UI
+            DispatchQueue.main.async {
+                self.onBufferUpdate?(self.currentBuffer)
+            }
+            
+            // Auto-save when buffer gets long enough
+            if self.currentBuffer.count >= 50 {
+                self.saveBuffer()
             }
         }
     }
     
-    @objc private func addMemoryToBuffer(_ notification: Notification) {
-        guard let text = notification.object as? String else { return }
-        
-        // Add the memory text to current buffer with a newline
-        if !currentBuffer.isEmpty {
-            currentBuffer += "\n" + text
-        } else {
-            currentBuffer += text
-        }
-        
-        // Update UI
-        DispatchQueue.main.async { [weak self] in
-            self?.onBufferUpdate?(self?.currentBuffer ?? "")
-        }
-    }
+
     
     func stopLogging() {
-        if let monitor = eventMonitor {
+        if let monitor = globalMonitor {
             NSEvent.removeMonitor(monitor)
-            eventMonitor = nil
+            globalMonitor = nil
         }
         
         // Remove notification observer
         NotificationCenter.default.removeObserver(self, name: NSNotification.Name("AddMemoryToInput"), object: nil)
     }
 
+    func clearBuffer() {
+        currentBuffer = ""
+        DispatchQueue.main.async {
+            self.onBufferUpdate?("")
+        }
+        print("🔍 Buffer cleared")
+    }
+    
     private func saveBuffer() {
+        guard !currentBuffer.isEmpty else { return }
+        
         guard let db = db else {
             print("❌ Firestore not initialized")
             DispatchQueue.main.async {
@@ -93,31 +137,34 @@ class KeyLogger: ObservableObject {
             return
         }
         
-        let trimmed = currentBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-
-        let data: [String: Any] = [
-            "text": trimmed,
-            "timestamp": FieldValue.serverTimestamp(),
-            "appName": getCurrentAppName(),
-            "windowTitle": getCurrentWindowTitle()
+        let textToSave = currentBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !textToSave.isEmpty else { return }
+        
+        // Get current app and window info
+        let appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Unknown"
+        let windowTitle = getCurrentWindowTitle()
+        
+        let memoryData: [String: Any] = [
+            "text": textToSave,
+            "timestamp": Timestamp(date: Date()),
+            "appName": appName,
+            "windowTitle": windowTitle
         ]
-
-        db.collection("memory").addDocument(data: data) { [weak self] error in
+        
+        print("🔍 Saving to Firestore: \(textToSave)")
+        
+        db.collection("memory").addDocument(data: memoryData) { [weak self] error in
             DispatchQueue.main.async {
                 if let error = error {
-                    print("❌ Firestore Error: \(error.localizedDescription)")
+                    print("❌ Error saving to Firestore: \(error.localizedDescription)")
                     self?.onError?("Failed to save: \(error.localizedDescription)")
                 } else {
-                    print("✅ Saved memory: \(trimmed)")
-                    self?.onTextSaved?(trimmed)
+                    print("✅ Successfully saved to Firestore")
+                    self?.onTextSaved?(textToSave)
+                    self?.currentBuffer = ""
+                    self?.onBufferUpdate?("")
                 }
             }
-        }
-
-        currentBuffer = ""
-        DispatchQueue.main.async { [weak self] in
-            self?.onBufferUpdate?("")
         }
     }
     
@@ -138,3 +185,4 @@ class KeyLogger: ObservableObject {
         stopLogging()
     }
 }
+

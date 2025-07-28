@@ -2,43 +2,62 @@ import Foundation
 import SwiftUI
 
 class KeyLoggerWrapper: ObservableObject {
-    private let logger = KeyLogger()
+    private let keyLogger = KeyLogger()
+    @Published var currentBuffer = ""
+    @Published var lastSavedText = ""
+    @Published var errorMessage: String?
+    @Published var isLogging = false
     
-    @Published var currentBuffer: String = ""
-    @Published var lastSavedText: String = ""
-    @Published var errorMessage: String = ""
-    @Published var isLogging: Bool = false
-
-    func start() {
-        logger.onBufferUpdate = { [weak self] buffer in
+    init() {
+        setupCallbacks()
+    }
+    
+    private func setupCallbacks() {
+        keyLogger.onBufferUpdate = { [weak self] buffer in
             DispatchQueue.main.async {
                 self?.currentBuffer = buffer
             }
         }
         
-        logger.onTextSaved = { [weak self] savedText in
+        keyLogger.onTextSaved = { [weak self] text in
             DispatchQueue.main.async {
-                self?.lastSavedText = savedText
+                self?.lastSavedText = text
             }
         }
         
-        logger.onError = { [weak self] error in
+        keyLogger.onError = { [weak self] error in
             DispatchQueue.main.async {
                 self?.errorMessage = error
             }
         }
         
-        logger.startLogging()
+        keyLogger.onTypingStarted = {
+            DispatchQueue.main.async {
+                // Show floating modal when typing starts
+                NotificationCenter.default.post(name: NSNotification.Name("ShowFloatingModal"), object: nil)
+            }
+        }
+        
+        keyLogger.onTypingStopped = {
+            DispatchQueue.main.async {
+                // Hide floating modal when typing stops
+                NotificationCenter.default.post(name: NSNotification.Name("HideFloatingModal"), object: nil)
+            }
+        }
+    }
+    
+    func start() {
+        keyLogger.startLogging()
         isLogging = true
     }
     
     func stop() {
-        logger.stopLogging()
+        keyLogger.stopLogging()
         isLogging = false
     }
     
     func clearBuffer() {
-        currentBuffer = ""
+        keyLogger.clearBuffer()
     }
 }
 

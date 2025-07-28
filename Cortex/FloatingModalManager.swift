@@ -1,9 +1,45 @@
 import SwiftUI
 import AppKit
 
-class FloatingModalManager: ObservableObject {
+class FloatingModalManager: NSObject, ObservableObject {
     private var floatingWindow: NSWindow?
     @Published var isVisible = false
+    
+    override init() {
+        super.init()
+        setupNotificationObservers()
+    }
+    
+    private func setupNotificationObservers() {
+        // Remove existing observers first
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("ShowFloatingModal"), object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("HideFloatingModal"), object: nil)
+        
+        // Add observers for automatic show/hide
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(showModalAutomatically),
+            name: NSNotification.Name("ShowFloatingModal"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(hideModalAutomatically),
+            name: NSNotification.Name("HideFloatingModal"),
+            object: nil
+        )
+    }
+    
+    @objc private func showModalAutomatically() {
+        print("🔍 Auto-showing floating modal (typing detected)")
+        showModal()
+    }
+    
+    @objc private func hideModalAutomatically() {
+        print("🔍 Auto-hiding floating modal (typing stopped)")
+        hideModal()
+    }
     
     func showModal() {
         if floatingWindow == nil {
@@ -12,6 +48,7 @@ class FloatingModalManager: ObservableObject {
         
         print("🔍 Showing floating modal")
         floatingWindow?.orderFront(nil)
+        // Keep it floating by not making it key
         isVisible = true
     }
     
@@ -45,7 +82,7 @@ class FloatingModalManager: ObservableObject {
         let initialX = screenFrame.maxX - windowWidth - padding
         let initialY = screenFrame.maxY - windowHeight - padding
         
-        floatingWindow = NSWindow(
+        floatingWindow = NonActivatingPanel(
             contentRect: NSRect(x: initialX, y: initialY, width: windowWidth, height: windowHeight),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -58,6 +95,9 @@ class FloatingModalManager: ObservableObject {
         floatingWindow?.hasShadow = true
         floatingWindow?.level = .floating
         floatingWindow?.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        
+        // Set window delegate to prevent activation
+        floatingWindow?.delegate = self
         
         // Make the entire window draggable
         let dragView = NSView()
@@ -127,10 +167,40 @@ class FloatingModalManager: ObservableObject {
             break
         }
     }
-    
+
     deinit {
         print("🔍 FloatingModalManager deinit")
+        NotificationCenter.default.removeObserver(self)
         floatingWindow?.close()
         floatingWindow = nil
+    }
+}
+
+// MARK: - NSWindowDelegate
+extension FloatingModalManager: NSWindowDelegate {
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        return true
+    }
+    
+    func windowWillClose(_ notification: Notification) {
+        isVisible = false
+    }
+    
+    func windowDidResignKey(_ notification: Notification) {
+        // Keep window floating even when it loses focus
+        if let window = notification.object as? NSWindow, window == floatingWindow {
+            print("🔍 Window resigned key, keeping it floating")
+        }
+    }
+    
+    func windowDidBecomeKey(_ notification: Notification) {
+        // Prevent window from becoming key
+        if let window = notification.object as? NSWindow, window == floatingWindow {
+            print("🔍 Window became key, preventing activation")
+            // Immediately resign key to keep it floating
+            DispatchQueue.main.async {
+                window.resignKey()
+            }
+        }
     }
 } 

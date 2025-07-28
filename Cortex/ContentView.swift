@@ -9,163 +9,197 @@ struct ContentView: View {
     @State private var showSavedMessage: Bool = false
     
     var body: some View {
-        VStack(spacing: 20) {
-            // Header
-            HStack {
-                Image(systemName: "brain.head.profile")
-                    .imageScale(.large)
-                    .foregroundStyle(.blue)
-                Text("Cortex - Memory Capture")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-            }
-            
-            // Status indicator
-            HStack {
-                Circle()
-                    .fill(logger.isLogging ? Color.green : Color.red)
-                    .frame(width: 12, height: 12)
-                Text(logger.isLogging ? "Active - Capturing keystrokes" : "Inactive")
-                    .font(.caption)
-                    .foregroundColor(logger.isLogging ? .green : .red)
-            }
-            
-            // Error message
-            if !logger.errorMessage.isEmpty {
-                HStack {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.red)
-                    Text(logger.errorMessage)
-                        .foregroundColor(.red)
-                        .font(.caption)
+        ZStack {
+            LinearGradient(gradient: Gradient(colors: [Color(NSColor.windowBackgroundColor), Color.white]), startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+
+// MARK: - BlurView for macOS (wraps NSVisualEffectView)
+// If you wish to use BlurView in this file, uncomment below or move to a shared file.
+// struct BlurView: NSViewRepresentable {
+//     var style: NSVisualEffectView.Material = .contentBackground
+//     func makeNSView(context: Context) -> NSVisualEffectView {
+//         let view = NSVisualEffectView()
+//         view.material = style
+//         view.blendingMode = .withinWindow
+//         view.state = .active
+//         return view
+//     }
+//     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+//         nsView.material = style
+//     }
+// }
+
+            VStack(spacing: 28) {
+                // Header
+                HStack(spacing: 12) {
+                    Image(systemName: "brain.head.profile")
+                        .resizable()
+                        .frame(width: 34, height: 34)
+                        .foregroundColor(.blue)
+                        .shadow(color: .blue.opacity(0.2), radius: 8, x: 0, y: 4)
+                    Text("Cortex")
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
+                    Spacer()
                 }
-                .padding()
-                .background(Color.red.opacity(0.1))
-                .cornerRadius(8)
-            }
-            
-            // Current buffer display
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Current Input Buffer:")
-                    .font(.headline)
-                    .foregroundColor(.secondary)
-                
-                Text(logger.currentBuffer.isEmpty ? "Type something... (Press Enter to save)" : logger.currentBuffer)
-                    .font(.system(.body, design: .monospaced))
+                .padding(.top, 18)
+                .padding(.bottom, 4)
+                .padding(.horizontal, 8)
+
+                // Status indicator
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(logger.isLogging ? Color.green : Color.red)
+                        .frame(width: 14, height: 14)
+                        .shadow(color: (logger.isLogging ? Color.green : Color.red).opacity(0.2), radius: 4, x: 0, y: 2)
+                    Text(logger.isLogging ? "Active - Capturing keystrokes" : "Inactive")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(logger.isLogging ? .green : .red)
+                }
+
+                // Error message
+                if let errorMessage = logger.errorMessage, !errorMessage.isEmpty {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.red)
+                        Text(errorMessage)
+                            .foregroundColor(.red)
+                            .font(.caption)
+                    }
                     .padding()
-                    .frame(maxWidth: .infinity, minHeight: 100, alignment: .topLeading)
-                    .background(Color(NSColor.controlBackgroundColor))
-                    .cornerRadius(8)
-                    .foregroundColor(logger.currentBuffer.isEmpty ? .secondary : .primary)
-            }
-            
-            // Last saved text
-            if !logger.lastSavedText.isEmpty {
+                    .background(Color.red.opacity(0.12))
+                    .cornerRadius(10)
+                    .shadow(color: .red.opacity(0.08), radius: 6, x: 0, y: 2)
+                }
+
+                // Buffer and last saved cards
+                HStack(alignment: .top, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Current Input Buffer")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                        Text(logger.currentBuffer.isEmpty ? "Type something... (Press Enter to save)" : logger.currentBuffer)
+                            .font(.system(.body, design: .monospaced))
+                            .padding(12)
+                            .frame(minHeight: 90, alignment: .topLeading)
+                            .background(Color.white)
+                            .cornerRadius(10)
+                            .foregroundColor(logger.currentBuffer.isEmpty ? .secondary : .primary)
+                            .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
+                    }
+                    if !logger.lastSavedText.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Last Saved")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                            Text(logger.lastSavedText)
+                                .font(.system(.body, design: .monospaced))
+                                .padding(12)
+                                .frame(minHeight: 60, alignment: .topLeading)
+                                .background(Color.white)
+                                .cornerRadius(10)
+                                .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
+                        }
+                    }
+                }
+                .padding(.horizontal, 2)
+
+                // Control buttons
+                HStack(spacing: 18) {
+                    Button(action: {
+                        if logger.isLogging {
+                            logger.stop()
+                        } else {
+                            logger.start()
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: logger.isLogging ? "stop.circle.fill" : "play.circle.fill")
+                            Text(logger.isLogging ? "Stop Capturing" : "Start Capturing")
+                        }
+                        .font(.system(size: 15, weight: .medium))
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 20)
+                        .background(logger.isLogging ? Color.red : Color.green)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                        .shadow(color: (logger.isLogging ? Color.red : Color.green).opacity(0.10), radius: 6, x: 0, y: 2)
+                    }
+                    Button(action: { logger.clearBuffer() }) {
+                        HStack {
+                            Image(systemName: "trash")
+                            Text("Clear Buffer")
+                        }
+                        .font(.system(size: 15, weight: .medium))
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 20)
+                        .background(Color.orange)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                        .shadow(color: Color.orange.opacity(0.10), radius: 6, x: 0, y: 2)
+                    }
+                }
+
+                // Floating modal control
+                HStack(spacing: 18) {
+                    Button(action: { floatingModalManager.toggleModal() }) {
+                        HStack {
+                            Image(systemName: floatingModalManager.isVisible ? "eye.slash" : "eye")
+                            Text(floatingModalManager.isVisible ? "Hide Memories" : "Show Memories")
+                        }
+                        .font(.system(size: 15, weight: .medium))
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 20)
+                        .background(Color.purple)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                        .shadow(color: Color.purple.opacity(0.10), radius: 6, x: 0, y: 2)
+                    }
+                    Button(action: { testFirebaseConnection() }) {
+                        HStack {
+                            Image(systemName: "wifi")
+                            Text("Test Firebase")
+                        }
+                        .font(.system(size: 15, weight: .medium))
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 20)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                        .shadow(color: Color.blue.opacity(0.10), radius: 6, x: 0, y: 2)
+                    }
+                }
+
+                // Instructions
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Last Saved:")
+                    Text("Instructions")
                         .font(.headline)
                         .foregroundColor(.secondary)
-                    
-                    Text(logger.lastSavedText)
-                        .font(.system(.body, design: .monospaced))
-                        .padding()
-                        .frame(maxWidth: .infinity, minHeight: 60, alignment: .topLeading)
-                        .background(Color(NSColor.controlBackgroundColor))
-                        .cornerRadius(8)
-                }
-            }
-            
-            // Control buttons
-            HStack(spacing: 16) {
-                Button(action: {
-                    if logger.isLogging {
-                        logger.stop()
-                    } else {
-                        logger.start()
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("• Click 'Start Capturing' to begin monitoring keystrokes")
+                        Text("• Type in any text field across your system")
+                        Text("• Press Enter to save the current buffer to Firestore")
+                        Text("• All saved text goes to the 'memory' collection")
+                        Text("• The app captures keystrokes globally")
+                        Text("• Use 'Show Memories' to access your saved memories")
+                        Text("• Click any memory to add it to your current input")
+                        Text("• Press Escape to dismiss the floating window")
                     }
-                }) {
-                    HStack {
-                        Image(systemName: logger.isLogging ? "stop.circle.fill" : "play.circle.fill")
-                        Text(logger.isLogging ? "Stop Capturing" : "Start Capturing")
-                    }
-                    .padding()
-                    .background(logger.isLogging ? Color.red : Color.green)
-                    .foregroundColor(.white)
-                    .cornerRadius(8)
-                }
-                
-                Button(action: {
-                    logger.clearBuffer()
-                }) {
-                    HStack {
-                        Image(systemName: "trash")
-                        Text("Clear Buffer")
-                    }
-                    .padding()
-                    .background(Color.orange)
-                    .foregroundColor(.white)
-                    .cornerRadius(8)
-                }
-            }
-            
-            // Floating modal control
-            HStack(spacing: 16) {
-                Button(action: {
-                    floatingModalManager.toggleModal()
-                }) {
-                    HStack {
-                        Image(systemName: floatingModalManager.isVisible ? "eye.slash" : "eye")
-                        Text(floatingModalManager.isVisible ? "Hide Memories" : "Show Memories")
-                    }
-                    .padding()
-                    .background(Color.purple)
-                    .foregroundColor(.white)
-                    .cornerRadius(8)
-                }
-                
-                Button(action: {
-                    testFirebaseConnection()
-                }) {
-                    HStack {
-                        Image(systemName: "wifi")
-                        Text("Test Firebase")
-                    }
-                    .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(8)
-                }
-            }
-            
-            // Instructions
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Instructions:")
-                    .font(.headline)
+                    .font(.caption)
                     .foregroundColor(.secondary)
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("• Click 'Start Capturing' to begin monitoring keystrokes")
-                    Text("• Type in any text field across your system")
-                    Text("• Press Enter to save the current buffer to Firestore")
-                    Text("• All saved text goes to the 'memory' collection")
-                    Text("• The app captures keystrokes globally")
-                    Text("• Use 'Show Memories' to access your saved memories")
-                    Text("• Click any memory to add it to your current input")
-                    Text("• Press Escape to dismiss the floating window")
                 }
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .padding()
+                .background(Color.white.opacity(0.85))
+                .cornerRadius(10)
+                .shadow(color: .black.opacity(0.03), radius: 6, x: 0, y: 2)
+                .padding(.top, 6)
+
+                Spacer(minLength: 0)
             }
-            .padding()
-            .background(Color(NSColor.controlBackgroundColor))
-            .cornerRadius(8)
+            .padding(.horizontal, 32)
+            .padding(.bottom, 18)
         }
-        .padding()
-        .frame(minWidth: 500, minHeight: 400)
-        .onAppear {
-            // Start logging automatically
-            logger.start()
-        }
+        .onAppear { logger.start() }
     }
     
     private func testFirebaseConnection() {
