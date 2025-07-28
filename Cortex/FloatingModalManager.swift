@@ -38,45 +38,35 @@ class FloatingModalManager: NSObject, ObservableObject {
     }
     
     @objc private func showModalAutomatically() {
-        print("🔍 Auto-showing floating modal (typing detected)")
+        print("🔍 [FloatingModalManager] Auto-showing floating modal (typing detected)")
         showModal()
     }
     
     @objc private func hideModalAutomatically() {
-        print("🔍 Auto-hiding floating modal (typing stopped)")
+        print("🔍 [FloatingModalManager] Auto-hiding floating modal (typing stopped)")
         hideModal()
     }
     
     func showModal() {
-        // Queue the operation to prevent concurrent access
-        showHideQueue.append { [weak self] in
+        DispatchQueue.main.async { [weak self] in
             self?.performShowModal()
-        }
-        
-        if !isProcessingQueue {
-            processQueue()
         }
     }
     
     private func performShowModal() {
-        // Prevent rapid show/hide cycles and concurrent operations
         let now = Date()
-        if isProcessingShowHide {
-            print("🔍 Skipping show operation - already processing")
-            return
-        }
         
-        if now.timeIntervalSince(lastShowTime) < 0.2 {
-            print("🔍 Skipping show operation - too soon since last show")
+        // Simple check to prevent rapid show/hide cycles
+        if now.timeIntervalSince(lastShowTime) < 0.1 {
+            print("🔍 [FloatingModalManager] Skipping show - too soon")
             return
         }
         
         if isVisible {
-            print("🔍 Skipping show operation - already visible")
+            print("🔍 [FloatingModalManager] Already visible")
             return
         }
         
-        isProcessingShowHide = true
         lastShowTime = now
         
         if !isWindowCreated {
@@ -84,59 +74,45 @@ class FloatingModalManager: NSObject, ObservableObject {
         }
         
         guard let window = floatingWindow else {
-            print("🔍 Window creation failed")
-            isProcessingShowHide = false
+            print("❌ [FloatingModalManager] Window creation failed")
             return
         }
         
-        print("🔍 Showing floating modal")
+        print("✅ [FloatingModalManager] Showing floating modal")
         window.orderFront(nil)
         isVisible = true
-        isProcessingShowHide = false
     }
     
     func hideModal() {
-        // Queue the operation to prevent concurrent access
-        showHideQueue.append { [weak self] in
+        DispatchQueue.main.async { [weak self] in
             self?.performHideModal()
-        }
-        
-        if !isProcessingQueue {
-            processQueue()
         }
     }
     
     private func performHideModal() {
-        // Prevent rapid show/hide cycles and concurrent operations
         let now = Date()
-        if isProcessingShowHide {
-            print("🔍 Skipping hide operation - already processing")
-            return
-        }
         
-        if now.timeIntervalSince(lastHideTime) < 0.2 {
-            print("🔍 Skipping hide operation - too soon since last hide")
+        // Simple check to prevent rapid show/hide cycles
+        if now.timeIntervalSince(lastHideTime) < 0.1 {
+            print("🔍 [FloatingModalManager] Skipping hide - too soon")
             return
         }
         
         if !isVisible {
-            print("🔍 Skipping hide operation - already hidden")
+            print("🔍 [FloatingModalManager] Already hidden")
             return
         }
         
-        isProcessingShowHide = true
         lastHideTime = now
         
         guard let window = floatingWindow else {
-            print("🔍 Window is nil")
-            isProcessingShowHide = false
+            print("❌ [FloatingModalManager] No window to hide")
             return
         }
         
-        print("🔍 Hiding floating modal")
+        print("✅ [FloatingModalManager] Hiding floating modal")
         window.orderOut(nil)
         isVisible = false
-        isProcessingShowHide = false
     }
     
     private func processQueue() {

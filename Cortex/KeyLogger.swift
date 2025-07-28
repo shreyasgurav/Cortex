@@ -35,14 +35,29 @@ class KeyLogger: ObservableObject {
     }
     
     func startLogging() {
-        // Ensure Firebase is configured
-        guard FirebaseApp.app() != nil else {
-            print("❌ Firebase not configured")
+        print("🔍 [KeyLogger] startLogging called")
+        
+        // Check Firebase configuration
+        if FirebaseApp.app() == nil {
+            print("❌ [KeyLogger] Firebase not configured")
             DispatchQueue.main.async {
                 self.onError?("Firebase not configured. Please restart the app.")
             }
             return
         }
+        
+        print("✅ [KeyLogger] Firebase is configured")
+        
+        // Check Firestore availability
+        guard let db = db else {
+            print("❌ [KeyLogger] Firestore not initialized")
+            DispatchQueue.main.async {
+                self.onError?("Firestore not initialized. Please restart the app.")
+            }
+            return
+        }
+        
+        print("✅ [KeyLogger] Firestore is available")
         
         // Remove any existing observer first
         NotificationCenter.default.removeObserver(self, name: NSNotification.Name("AddMemoryToInput"), object: nil)
@@ -94,37 +109,29 @@ class KeyLogger: ObservableObject {
                 self.saveBuffer()
             }
         }
+        
+        print("✅ [KeyLogger] Global monitor started successfully")
     }
     
     private func handleTypingState() {
-        // Prevent concurrent processing
-        if isProcessingTypingState {
-            return
-        }
-        
         let now = Date()
         
-        // If not currently typing, start typing with debouncing
+        // If not currently typing, start typing
         if !isTypingActive {
-            // Debounce typing start to prevent rapid show/hide cycles
-            if now.timeIntervalSince(lastTypingStartTime) < 0.5 {
-                return
-            }
-            
-            isProcessingTypingState = true
             isTypingActive = true
             lastTypingStartTime = now
-            print("🔍 [KeyLogger] Typing started")
+            print("🔍 [KeyLogger] Typing started - showing floating modal")
             
             DispatchQueue.main.async {
                 self.onTypingStarted?()
-                self.isProcessingTypingState = false
+                // Automatically show the floating modal when typing starts
+                NotificationCenter.default.post(name: NSNotification.Name("ShowFloatingModal"), object: nil)
             }
         }
         
-        // Reset the typing timer with a longer delay
+        // Reset the typing timer
         typingTimer?.invalidate()
-        typingTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
+        typingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
             self?.stopTyping()
         }
     }
@@ -132,19 +139,14 @@ class KeyLogger: ObservableObject {
     private func stopTyping() {
         guard isTypingActive else { return }
         
-        let now = Date()
-        
-        // Debounce typing stop to prevent rapid show/hide cycles
-        if now.timeIntervalSince(lastTypingStopTime) < 0.5 {
-            return
-        }
-        
         isTypingActive = false
-        lastTypingStopTime = now
-        print("🔍 [KeyLogger] Typing stopped")
+        lastTypingStopTime = Date()
+        print("🔍 [KeyLogger] Typing stopped - hiding floating modal")
         
         DispatchQueue.main.async {
             self.onTypingStopped?()
+            // Automatically hide the floating modal when typing stops
+            NotificationCenter.default.post(name: NSNotification.Name("HideFloatingModal"), object: nil)
         }
     }
     

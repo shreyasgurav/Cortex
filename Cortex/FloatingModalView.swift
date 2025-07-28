@@ -22,6 +22,7 @@ struct FloatingModalView: View {
     @State private var searchText = ""
     @State private var showAddedFeedback = false
     @State private var addedMemoryText = ""
+    @State private var isHovering = false
     
     var body: some View {
         mainContent
@@ -36,31 +37,76 @@ struct FloatingModalView: View {
                 contentView
             }
         }
-        .frame(minWidth: 320, maxWidth: 440, minHeight: 70, maxHeight: 650)
-        .background(BlurView(style: .contentBackground))
-        .cornerRadius(18)
-        .shadow(color: .black.opacity(0.18), radius: 18, x: 0, y: 8)
+        .frame(minWidth: 340, maxWidth: 480, minHeight: 80, maxHeight: 680)
+        .background(
+            ZStack {
+                // Glassmorphism background
+                BlurView(style: .hudWindow)
+                
+                // Subtle gradient overlay
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color.white.opacity(0.1),
+                        Color.white.opacity(0.05),
+                        Color.clear
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
+        )
+        .cornerRadius(20)
+        .overlay(
+            // Border with glow effect
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            Color.white.opacity(0.3),
+                            Color.white.opacity(0.1),
+                            Color.clear
+                        ]),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        )
+        .shadow(color: .black.opacity(0.25), radius: 20, x: 0, y: 10)
         .overlay(
             // Success feedback overlay
             Group {
                 if showAddedFeedback {
-                    VStack(spacing: 10) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                            .font(.system(size: 32, weight: .bold))
+                    VStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.green.opacity(0.2))
+                                .frame(width: 60, height: 60)
+                            
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                                .font(.system(size: 32, weight: .bold))
+                        }
+                        
                         Text("Added to active text field!")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(.green)
                     }
-                    .padding(20)
-                    .background(Color.green.opacity(0.18))
-                    .cornerRadius(12)
-                    .shadow(color: .green.opacity(0.12), radius: 12, x: 0, y: 4)
-                    .transition(.opacity)
+                    .padding(24)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color.green.opacity(0.15))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                            )
+                    )
+                    .shadow(color: .green.opacity(0.2), radius: 12, x: 0, y: 4)
+                    .transition(.scale.combined(with: .opacity))
                 }
             }
         )
-        .padding(8)
+        .padding(12)
         .onAppear {
             print("🔍 FloatingModalView appeared")
         }
@@ -71,47 +117,93 @@ struct FloatingModalView: View {
     }
     
     private var headerView: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "brain.head.profile")
-                .resizable()
-                .frame(width: 22, height: 22)
-                .foregroundColor(.blue)
-                .shadow(color: .blue.opacity(0.16), radius: 4, x: 0, y: 2)
-            Text("Cortex Memories")
-                .font(.system(size: 17, weight: .bold, design: .rounded))
-                .foregroundColor(.primary)
+        HStack(spacing: 12) {
+            // Animated logo
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(
+                        gradient: Gradient(colors: [Color.blue, Color.purple]),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 32, height: 32)
+                    .shadow(color: .blue.opacity(0.3), radius: 6, x: 0, y: 3)
+                
+                Image("Image")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 16, height: 16)
+                    .foregroundColor(.white)
+                    .fontWeight(.semibold)
+            }
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Cortex Memories")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(LinearGradient(
+                        gradient: Gradient(colors: [Color.white, Color.blue.opacity(0.8)]),
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    ))
+                
+                Text("\(memoryFetcher.memories.count) memories")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+            
             Spacer()
-            Button(action: { memoryFetcher.fetchMemories() }) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.secondary)
-            }
-            .buttonStyle(PlainButtonStyle())
-            Button(action: {
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    isVisible.toggle()
-                    if isVisible {
-                        memoryFetcher.fetchMemories()
-                    }
+            
+            // Control buttons
+            HStack(spacing: 8) {
+                Button(action: { memoryFetcher.fetchMemories() }) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(6)
                 }
-            }) {
-                Image(systemName: isVisible ? "chevron.down" : "chevron.up")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.secondary)
+                .buttonStyle(PlainButtonStyle())
+                
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        isVisible.toggle()
+                        if isVisible {
+                            memoryFetcher.fetchMemories()
+                        }
+                    }
+                }) {
+                    Image(systemName: isVisible ? "chevron.down" : "chevron.up")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(6)
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                Button(action: { NSApplication.shared.terminate(nil) }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.red)
+                        .frame(width: 24, height: 24)
+                        .background(Color.red.opacity(0.1))
+                        .cornerRadius(6)
+                }
+                .buttonStyle(PlainButtonStyle())
             }
-            .buttonStyle(PlainButtonStyle())
-            Button(action: { NSApplication.shared.terminate(nil) }) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.secondary)
-            }
-            .buttonStyle(PlainButtonStyle())
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .background(BlurView(style: .sidebar))
-        .cornerRadius(14)
-        .shadow(color: .black.opacity(0.03), radius: 4, x: 0, y: 2)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.white.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                )
+        )
+        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
     }
     
     private var contentView: some View {
@@ -122,42 +214,53 @@ struct FloatingModalView: View {
             // Memories list
             memoriesList
         }
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(12)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.white.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                )
+        )
     }
     
     private var searchBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.secondary)
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
+            
             TextField("Search memories...", text: $searchText)
                 .textFieldStyle(PlainTextFieldStyle())
-                .font(.system(size: 13))
-                .padding(.vertical, 6)
+                .font(.system(size: 13, weight: .medium))
+                .padding(.vertical, 8)
+            
             if !searchText.isEmpty {
                 Button(action: { searchText = "" }) {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundColor(.secondary)
-                        .font(.system(size: 13))
+                        .font(.system(size: 12))
                 }
                 .buttonStyle(PlainButtonStyle())
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
-        .background(BlurView(style: .menu))
-        .cornerRadius(8)
-        .padding(.horizontal, 18)
+        .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.white.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                )
+        )
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
     }
     
     private var memoriesList: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                // Debug info
-                debugInfo
-                
                 if memoryFetcher.isLoading {
                     loadingView
                 } else if let errorMessage = memoryFetcher.errorMessage {
@@ -167,31 +270,16 @@ struct FloatingModalView: View {
                 } else {
                     ForEach(filteredMemories) { memory in
                         MemoryRowView(memory: memory) {
-                            // Direct insertion without complex delays
                             addMemoryToInput(memory)
                         }
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.primary.opacity(0.03))
-                                .opacity(0)
-                                .onHover { hovering in
-                                    withAnimation(.easeInOut(duration: 0.18)) {
-                                        if hovering {
-                                            NSCursor.pointingHand.push()
-                                        } else {
-                                            NSCursor.pop()
-                                        }
-                                    }
-                                }
-                        )
-                        .padding(.horizontal, 6)
+                        .padding(.horizontal, 8)
                         .padding(.vertical, 2)
                     }
                 }
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 8)
         }
-        .frame(minHeight: 220, maxHeight: 440)
+        .frame(minHeight: 240, maxHeight: 480)
         .onAppear {
             print("🔍 Memories list appeared, memories count: \(memoryFetcher.memories.count)")
         }
@@ -203,53 +291,53 @@ struct FloatingModalView: View {
         }
     }
     
-    private var debugInfo: some View {
-        VStack(spacing: 4) {
-            Text("Debug: \(memoryFetcher.memories.count) memories, \(filteredMemories.count) filtered")
-                .font(.system(size: 9))
-                .foregroundColor(.secondary)
-            Text("Search: '\(searchText)'")
-                .font(.system(size: 9))
-                .foregroundColor(.secondary)
-        }
-        .padding(.vertical, 4)
-        .background(Color.yellow.opacity(0.1))
-    }
-    
     private var loadingView: some View {
-        HStack {
+        VStack(spacing: 12) {
             ProgressView()
                 .scaleEffect(0.8)
+                .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+            
             Text("Loading memories...")
-                .font(.system(size: 11))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundColor(.secondary)
         }
-        .padding(.vertical, 20)
+        .padding(.vertical, 40)
     }
     
     private func errorView(message: String) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundColor(.orange)
-                .font(.system(size: 16))
+                .font(.system(size: 20))
+            
+            Text("Error")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.orange)
+            
             Text(message)
-                .font(.system(size: 11))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
         }
-        .padding(.vertical, 20)
+        .padding(.vertical, 40)
     }
     
     private var emptyView: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 12) {
             Image(systemName: "text.bubble")
                 .foregroundColor(.secondary)
-                .font(.system(size: 16))
+                .font(.system(size: 20))
+            
             Text("No memories found")
-                .font(.system(size: 11))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(.secondary)
+            
+            Text("Start typing and press Enter to save memories")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
         }
-        .padding(.vertical, 20)
+        .padding(.vertical, 40)
     }
     
     private var filteredMemories: [MemoryItem] {
@@ -302,40 +390,64 @@ struct FloatingModalView: View {
 struct MemoryRowView: View {
     let memory: MemoryItem
     let onTap: () -> Void
+    @State private var isHovering = false
     
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text(memory.text)
-                    .font(.system(size: 11))
+                    .font(.system(size: 12, weight: .medium))
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
                     .foregroundColor(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
                 HStack {
-                    Text(memory.appName)
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
+                    HStack(spacing: 4) {
+                        Image(systemName: "app.fill")
+                            .font(.system(size: 8))
+                            .foregroundColor(.blue)
+                        
+                        Text(memory.appName)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
                     
                     Spacer()
                     
                     Text(memory.timestamp, style: .relative)
-                        .font(.system(size: 9))
+                        .font(.system(size: 9, weight: .medium))
                         .foregroundColor(.secondary)
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.clear)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isHovering ? Color.blue.opacity(0.1) : Color.clear)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(isHovering ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1)
+                    )
+            )
+            .onHover { hovering in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isHovering = hovering
+                }
+                if hovering {
+                    NSCursor.pointingHand.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
         }
         .buttonStyle(PlainButtonStyle())
         .contentShape(Rectangle())
-        .background(Color.clear)
         
         Divider()
             .padding(.horizontal, 16)
+            .opacity(0.3)
     }
 }
 

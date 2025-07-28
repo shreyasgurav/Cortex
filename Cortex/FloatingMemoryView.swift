@@ -95,9 +95,11 @@ struct FloatingMemoryView: View {
         VStack(spacing: 0) {
             // Header - always visible and draggable
             HStack {
-                Image(systemName: "brain.head.profile")
+                Image("Image")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 16, height: 16)
                     .foregroundColor(.blue)
-                    .font(.system(size: 16, weight: .medium))
                 
                 Text("Cortex Memories")
                     .font(.system(size: 12, weight: .semibold))

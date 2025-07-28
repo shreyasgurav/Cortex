@@ -10,12 +10,22 @@ import FirebaseCore
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        print("🔍 AppDelegate: Configuring Firebase")
+        print("🔍 AppDelegate: applicationDidFinishLaunching called")
+        
+        // Ensure Firebase is configured
         if FirebaseApp.app() == nil {
+            print("🔍 AppDelegate: Firebase not configured, configuring now")
             FirebaseApp.configure()
             print("✅ Firebase configured successfully in AppDelegate")
         } else {
-            print("✅ Firebase already configured")
+            print("✅ Firebase already configured in AppDelegate")
+        }
+        
+        // Verify Firebase is working
+        if let app = FirebaseApp.app() {
+            print("✅ Firebase app instance verified: \(app.name)")
+        } else {
+            print("❌ Firebase app instance not available")
         }
         
         // Setup notification observers
