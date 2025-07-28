@@ -5,8 +5,17 @@ import FirebaseCore
 
 struct ContentView: View {
     @StateObject private var logger = KeyLoggerWrapper()
-    @StateObject private var floatingModalManager = FloatingModalManager()
+    @StateObject private var memoryManager = MemoryManager()
+    @StateObject private var floatingModalManager: FloatingModalManager
     @State private var showSavedMessage: Bool = false
+    @State private var showMemoryManager: Bool = false
+    @State private var showAddMemorySheet: Bool = false
+    
+    init() {
+        let memoryManager = MemoryManager()
+        self._memoryManager = StateObject(wrappedValue: memoryManager)
+        self._floatingModalManager = StateObject(wrappedValue: FloatingModalManager(memoryManager: memoryManager))
+    }
     
     var body: some View {
         ZStack {
@@ -60,12 +69,27 @@ struct ContentView: View {
                 // Control Buttons
                 controlButtonsSection
                 
+                // Memory Management Button
+                memoryManagementButton
+                
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 40)
             .padding(.vertical, 32)
         }
-        .onAppear { logger.start() }
+        .onAppear { 
+            print("🔍 [ContentView] View appeared")
+            logger.start()
+            print("🔍 [ContentView] Logger started")
+            memoryManager.loadMemories()
+            print("🔍 [ContentView] MemoryManager loadMemories called")
+        }
+        .sheet(isPresented: $showMemoryManager) {
+            MemoryManagerView(memoryManager: memoryManager)
+        }
+        .sheet(isPresented: $showAddMemorySheet) {
+            AddMemoryView(memoryManager: memoryManager)
+        }
     }
     
     // MARK: - Header Section
@@ -272,6 +296,30 @@ struct ContentView: View {
                 .cornerRadius(12)
                 .shadow(color: Color.purple.opacity(0.3), radius: 8, x: 0, y: 4)
             }
+        }
+    }
+    
+    // MARK: - Memory Management Button
+    private var memoryManagementButton: some View {
+        Button(action: { showMemoryManager = true }) {
+            HStack(spacing: 8) {
+                Image(systemName: "brain.head.profile")
+                    .font(.system(size: 16))
+                Text("Manage Memories")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 24)
+            .background(
+                LinearGradient(
+                    gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .foregroundColor(.white)
+            .cornerRadius(12)
+            .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
         }
     }
 }

@@ -17,12 +17,16 @@ struct BlurView: NSViewRepresentable {
 }
 
 struct FloatingModalView: View {
-    @StateObject private var memoryFetcher = MemoryFetcher()
+    @ObservedObject var memoryManager: MemoryManager
     @State private var isVisible = false
     @State private var searchText = ""
     @State private var showAddedFeedback = false
     @State private var addedMemoryText = ""
     @State private var isHovering = false
+    
+    var filteredMemories: [Memory] {
+        memoryManager.searchMemories(query: searchText)
+    }
     
     var body: some View {
         mainContent
@@ -101,18 +105,24 @@ struct FloatingModalView: View {
                                     .stroke(Color.green.opacity(0.3), lineWidth: 1)
                             )
                     )
-                    .shadow(color: .green.opacity(0.2), radius: 12, x: 0, y: 4)
                     .transition(.scale.combined(with: .opacity))
                 }
             }
         )
-        .padding(12)
         .onAppear {
-            print("🔍 FloatingModalView appeared")
+            print("🔍 [FloatingModalView] View appeared")
+            memoryManager.loadMemories()
+            print("🔍 [FloatingModalView] Called loadMemories, memories count: \(memoryManager.memories.count)")
         }
-        .onDisappear {
-            print("🔍 FloatingModalView disappeared")
-            memoryFetcher.cleanup()
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ShowFloatingModal"))) { _ in
+            withAnimation(.easeInOut(duration: 0.3)) {
+                isVisible = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("HideFloatingModal"))) { _ in
+            withAnimation(.easeInOut(duration: 0.3)) {
+                isVisible = false
+            }
         }
     }
     
@@ -146,7 +156,7 @@ struct FloatingModalView: View {
                         endPoint: .trailing
                     ))
                 
-                Text("\(memoryFetcher.memories.count) memories")
+                Text("\(memoryManager.memories.count) memories")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundColor(.secondary)
             }
@@ -155,7 +165,7 @@ struct FloatingModalView: View {
             
             // Control buttons
             HStack(spacing: 8) {
-                Button(action: { memoryFetcher.fetchMemories() }) {
+                Button(action: { memoryManager.loadMemories() }) {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.secondary)
@@ -169,7 +179,7 @@ struct FloatingModalView: View {
                     withAnimation(.easeInOut(duration: 0.3)) {
                         isVisible.toggle()
                         if isVisible {
-                            memoryFetcher.fetchMemories()
+                            memoryManager.loadMemories()
                         }
                     }
                 }) {
@@ -261,9 +271,9 @@ struct FloatingModalView: View {
     private var memoriesList: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                if memoryFetcher.isLoading {
+                if memoryManager.isLoading {
                     loadingView
-                } else if let errorMessage = memoryFetcher.errorMessage {
+                } else if let errorMessage = memoryManager.errorMessage {
                     errorView(message: errorMessage)
                 } else if filteredMemories.isEmpty {
                     emptyView
@@ -281,9 +291,9 @@ struct FloatingModalView: View {
         }
         .frame(minHeight: 240, maxHeight: 480)
         .onAppear {
-            print("🔍 Memories list appeared, memories count: \(memoryFetcher.memories.count)")
+            print("🔍 Memories list appeared, memories count: \(memoryManager.memories.count)")
         }
-        .onChange(of: memoryFetcher.memories) { _, newMemories in
+        .onChange(of: memoryManager.memories) { _, newMemories in
             print("🔍 Memories changed: \(newMemories.count) memories")
         }
         .onChange(of: searchText) { _, newSearchText in
@@ -340,23 +350,7 @@ struct FloatingModalView: View {
         .padding(.vertical, 40)
     }
     
-    private var filteredMemories: [MemoryItem] {
-        let memories = memoryFetcher.memories
-        print("🔍 Filtering \(memories.count) memories, search text: '\(searchText)'")
-        
-        if searchText.isEmpty {
-            return memories
-        } else {
-            let filtered = memories.filter { memory in
-                memory.text.localizedCaseInsensitiveContains(searchText) ||
-                memory.appName.localizedCaseInsensitiveContains(searchText)
-            }
-            print("🔍 Filtered to \(filtered.count) memories")
-            return filtered
-        }
-    }
-    
-    private func addMemoryToInput(_ memory: MemoryItem) {
+    private func addMemoryToInput(_ memory: Memory) {
         print("🔍 [FloatingModalView] Adding memory to input: \(memory.text)")
         
         // Hide the floating modal first
@@ -387,70 +381,8 @@ struct FloatingModalView: View {
     }
 }
 
-struct MemoryRowView: View {
-    let memory: MemoryItem
-    let onTap: () -> Void
-    @State private var isHovering = false
-    
-    var body: some View {
-        Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(memory.text)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(3)
-                    .multilineTextAlignment(.leading)
-                    .foregroundColor(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                
-                HStack {
-                    HStack(spacing: 4) {
-                        Image(systemName: "app.fill")
-                            .font(.system(size: 8))
-                            .foregroundColor(.blue)
-                        
-                        Text(memory.appName)
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    Spacer()
-                    
-                    Text(memory.timestamp, style: .relative)
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(.secondary)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(isHovering ? Color.blue.opacity(0.1) : Color.clear)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(isHovering ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1)
-                    )
-            )
-            .onHover { hovering in
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isHovering = hovering
-                }
-                if hovering {
-                    NSCursor.pointingHand.push()
-                } else {
-                    NSCursor.pop()
-                }
-            }
-        }
-        .buttonStyle(PlainButtonStyle())
-        .contentShape(Rectangle())
-        
-        Divider()
-            .padding(.horizontal, 16)
-            .opacity(0.3)
-    }
-}
+
 
 #Preview {
-    FloatingModalView()
+    FloatingModalView(memoryManager: MemoryManager())
 } 

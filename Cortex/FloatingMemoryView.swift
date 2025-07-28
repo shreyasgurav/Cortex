@@ -2,25 +2,6 @@ import SwiftUI
 import FirebaseFirestore
 import FirebaseCore
 
-struct Memory: Identifiable {
-    let id: String
-    let text: String
-    let timestamp: Date
-    let appName: String
-    
-    init(document: QueryDocumentSnapshot) {
-        self.id = document.documentID
-        self.text = document.data()["text"] as? String ?? ""
-        self.appName = document.data()["appName"] as? String ?? "Unknown"
-        
-        if let timestamp = document.data()["timestamp"] as? Timestamp {
-            self.timestamp = timestamp.dateValue()
-        } else {
-            self.timestamp = Date()
-        }
-    }
-}
-
 class FloatingMemoryViewModel: ObservableObject {
     @Published var memories: [Memory] = []
     @Published var isLoading = false
@@ -54,7 +35,7 @@ class FloatingMemoryViewModel: ObservableObject {
         isLoading = true
         errorMessage = ""
         
-        db.collection("memory")
+        db.collection("memories")
             .order(by: "timestamp", descending: true)
             .limit(to: 20)
             .getDocuments { [weak self] querySnapshot, error in
@@ -73,7 +54,24 @@ class FloatingMemoryViewModel: ObservableObject {
                         return
                     }
                     
-                    self.memories = documents.map { Memory(document: $0) }
+                    self.memories = documents.compactMap { document in
+                        do {
+                            let data = document.data()
+                            let text = data["text"] as? String ?? ""
+                            let timestamp = (data["timestamp"] as? Timestamp)?.dateValue() ?? Date()
+                            let tags = data["tags"] as? [String] ?? []
+                            
+                            return Memory(
+                                id: document.documentID,
+                                text: text,
+                                timestamp: timestamp,
+                                tags: tags
+                            )
+                        } catch {
+                            print("❌ [FloatingMemoryView] Error parsing document: \(error)")
+                            return nil
+                        }
+                    }
                 }
             }
     }
@@ -101,126 +99,193 @@ struct FloatingMemoryView: View {
                     .frame(width: 16, height: 16)
                     .foregroundColor(.blue)
                 
-                Text("Cortex Memories")
-                    .font(.system(size: 12, weight: .semibold))
+                Text("Memories")
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.primary)
                 
                 Spacer()
                 
+                // Toggle button
                 Button(action: {
                     withAnimation(.easeInOut(duration: 0.3)) {
                         isExpanded.toggle()
-                        if isExpanded {
-                            viewModel.loadMemories()
-                        }
+                    }
+                    if isExpanded {
+                        viewModel.loadMemories()
                     }
                 }) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.up")
-                        .font(.system(size: 12))
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(PlainButtonStyle())
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(Color(NSColor.controlBackgroundColor))
-            .cornerRadius(10)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.white.opacity(0.1))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    )
+            )
             
             // Expandable content
             if isExpanded {
                 VStack(spacing: 0) {
-                    // Memories list
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            if viewModel.isLoading {
-                                HStack {
-                                    ProgressView()
-                                        .scaleEffect(0.8)
-                                    Text("Loading memories...")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
-                                }
-                                .padding(.vertical, 20)
-                            } else if !viewModel.errorMessage.isEmpty {
-                                VStack(spacing: 8) {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .foregroundColor(.orange)
-                                        .font(.system(size: 16))
-                                    Text(viewModel.errorMessage)
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
-                                        .multilineTextAlignment(.center)
-                                }
-                                .padding(.vertical, 20)
-                            } else if viewModel.memories.isEmpty {
-                                VStack(spacing: 8) {
-                                    Image(systemName: "text.bubble")
-                                        .foregroundColor(.secondary)
-                                        .font(.system(size: 16))
-                                    Text("No memories yet")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
-                                }
-                                .padding(.vertical, 20)
-                            } else {
-                                ForEach(viewModel.memories) { memory in
-                                    MemoryRow(memory: memory) {
-                                        viewModel.addMemoryToInput(memory)
-                                    }
-                                }
-                            }
-                        }
+                    if viewModel.isLoading {
+                        loadingView
+                    } else if !viewModel.errorMessage.isEmpty {
+                        errorView
+                    } else if viewModel.memories.isEmpty {
+                        emptyView
+                    } else {
+                        memoriesList
                     }
-                    .frame(maxHeight: 250)
                 }
-                .background(Color(NSColor.controlBackgroundColor))
-                .cornerRadius(10)
+                .padding(.top, 8)
             }
         }
         .frame(width: 300)
-        .background(Color.clear)
+        .padding(12)
+    }
+    
+    private var loadingView: some View {
+        HStack {
+            ProgressView()
+                .scaleEffect(0.8)
+                .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+            
+            Text("Loading memories...")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 20)
+    }
+    
+    private var errorView: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(.orange)
+                .font(.system(size: 16))
+            
+            Text("Error")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.orange)
+            
+            Text(viewModel.errorMessage)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.vertical, 20)
+    }
+    
+    private var emptyView: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "text.bubble")
+                .foregroundColor(.secondary)
+                .font(.system(size: 16))
+            
+            Text("No memories yet")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.secondary)
+            
+            Text("Start typing to save memories")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 20)
+    }
+    
+    private var memoriesList: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(viewModel.memories) { memory in
+                    MemoryRowView(memory: memory) {
+                        viewModel.addMemoryToInput(memory)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                }
+            }
+            .padding(.vertical, 8)
+        }
+        .frame(maxHeight: 300)
     }
 }
 
-struct MemoryRow: View {
+struct MemoryRowView: View {
     let memory: Memory
     let onTap: () -> Void
+    @State private var isHovering = false
     
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text(memory.text)
-                    .font(.system(size: 11))
+                    .font(.system(size: 12, weight: .medium))
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
                     .foregroundColor(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
                 HStack {
-                    Text(memory.appName)
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
+                    // Tags
+                    if !memory.tags.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 4) {
+                                ForEach(memory.tags, id: \.self) { tag in
+                                    Text(tag)
+                                        .font(.system(size: 8, weight: .medium))
+                                        .foregroundColor(.blue)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 4)
+                                                .fill(Color.blue.opacity(0.2))
+                                        )
+                                }
+                            }
+                        }
+                    }
                     
                     Spacer()
                     
                     Text(memory.timestamp, style: .relative)
-                        .font(.system(size: 9))
+                        .font(.system(size: 9, weight: .medium))
                         .foregroundColor(.secondary)
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.clear)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isHovering ? Color.blue.opacity(0.1) : Color.clear)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(isHovering ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1)
+                    )
+            )
+            .onHover { hovering in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isHovering = hovering
+                }
+                if hovering {
+                    NSCursor.pointingHand.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
         }
         .buttonStyle(PlainButtonStyle())
         .contentShape(Rectangle())
-        .background(Color.clear)
         
-        if memory.id != "last" {
-            Divider()
-                .padding(.horizontal, 16)
-        }
+        Divider()
+            .padding(.horizontal, 16)
+            .opacity(0.3)
     }
 }
 

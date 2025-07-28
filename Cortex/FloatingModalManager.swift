@@ -10,10 +10,15 @@ class FloatingModalManager: NSObject, ObservableObject {
     private var isProcessingShowHide = false
     private var showHideQueue: [() -> Void] = []
     private var isProcessingQueue = false
+    private var memoryManager: MemoryManager
     
-    override init() {
+    init(memoryManager: MemoryManager) {
+        print("🔍 [FloatingModalManager] Initializing with memoryManager")
+        self.memoryManager = memoryManager
         super.init()
+        print("🔍 [FloatingModalManager] Setting up notification observers")
         setupNotificationObservers()
+        print("🔍 [FloatingModalManager] Initialization complete")
     }
     
     private func setupNotificationObservers() {
@@ -141,8 +146,9 @@ class FloatingModalManager: NSObject, ObservableObject {
     }
     
     private func createFloatingWindow() {
-        print("🔍 Creating floating window")
-        let contentView = FloatingModalView()
+        print("🔍 [FloatingModalManager] Creating floating window")
+        let contentView = FloatingModalView(memoryManager: memoryManager)
+        print("🔍 [FloatingModalManager] Created FloatingModalView with memoryManager")
         let hostingView = NSHostingView(rootView: contentView)
         
         // Get screen dimensions for flexible positioning
