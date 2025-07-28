@@ -7,6 +7,11 @@ class KeyLogger: ObservableObject {
     private var currentBuffer = ""
     private var lastActivityTime = Date()
     private var typingTimer: Timer?
+    private var isTypingActive = false
+    private var typingDebounceTimer: Timer?
+    private var lastTypingStartTime: Date = Date.distantPast
+    private var lastTypingStopTime: Date = Date.distantPast
+    private var isProcessingTypingState = false
     
     // Callbacks
     var onBufferUpdate: ((String) -> Void)?
@@ -39,13 +44,8 @@ class KeyLogger: ObservableObject {
             return
         }
         
-        // Initialize Firestore
-        // db = Firestore.firestore() // This line is now handled by the lazy var
-        
         // Remove any existing observer first
         NotificationCenter.default.removeObserver(self, name: NSNotification.Name("AddMemoryToInput"), object: nil)
-        
-
         
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self, let characters = event.characters else { return }
@@ -53,18 +53,8 @@ class KeyLogger: ObservableObject {
             // Update activity time
             self.lastActivityTime = Date()
             
-            // Notify typing started
-            DispatchQueue.main.async {
-                self.onTypingStarted?()
-            }
-            
-            // Reset typing timer
-            self.typingTimer?.invalidate()
-            self.typingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
-                DispatchQueue.main.async {
-                    self?.onTypingStopped?()
-                }
-            }
+            // Handle typing state with proper debouncing
+            self.handleTypingState()
             
             // Handle special keys
             for character in characters {
@@ -106,13 +96,74 @@ class KeyLogger: ObservableObject {
         }
     }
     
-
+    private func handleTypingState() {
+        // Prevent concurrent processing
+        if isProcessingTypingState {
+            return
+        }
+        
+        let now = Date()
+        
+        // If not currently typing, start typing with debouncing
+        if !isTypingActive {
+            // Debounce typing start to prevent rapid show/hide cycles
+            if now.timeIntervalSince(lastTypingStartTime) < 0.5 {
+                return
+            }
+            
+            isProcessingTypingState = true
+            isTypingActive = true
+            lastTypingStartTime = now
+            print("🔍 [KeyLogger] Typing started")
+            
+            DispatchQueue.main.async {
+                self.onTypingStarted?()
+                self.isProcessingTypingState = false
+            }
+        }
+        
+        // Reset the typing timer with a longer delay
+        typingTimer?.invalidate()
+        typingTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
+            self?.stopTyping()
+        }
+    }
+    
+    private func stopTyping() {
+        guard isTypingActive else { return }
+        
+        let now = Date()
+        
+        // Debounce typing stop to prevent rapid show/hide cycles
+        if now.timeIntervalSince(lastTypingStopTime) < 0.5 {
+            return
+        }
+        
+        isTypingActive = false
+        lastTypingStopTime = now
+        print("🔍 [KeyLogger] Typing stopped")
+        
+        DispatchQueue.main.async {
+            self.onTypingStopped?()
+        }
+    }
     
     func stopLogging() {
         if let monitor = globalMonitor {
             NSEvent.removeMonitor(monitor)
             globalMonitor = nil
         }
+        
+        // Stop typing if active
+        if isTypingActive {
+            stopTyping()
+        }
+        
+        // Invalidate timers
+        typingTimer?.invalidate()
+        typingTimer = nil
+        typingDebounceTimer?.invalidate()
+        typingDebounceTimer = nil
         
         // Remove notification observer
         NotificationCenter.default.removeObserver(self, name: NSNotification.Name("AddMemoryToInput"), object: nil)

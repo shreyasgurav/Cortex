@@ -16,15 +16,18 @@ struct BlurView: NSViewRepresentable {
     }
 }
 
-
 struct FloatingModalView: View {
-    private var memoryFetcher = MemoryFetcher()
+    @StateObject private var memoryFetcher = MemoryFetcher()
     @State private var isVisible = false
     @State private var searchText = ""
     @State private var showAddedFeedback = false
     @State private var addedMemoryText = ""
     
     var body: some View {
+        mainContent
+    }
+    
+    private var mainContent: some View {
         VStack(spacing: 0) {
             // Header
             headerView
@@ -60,7 +63,6 @@ struct FloatingModalView: View {
         .padding(8)
         .onAppear {
             print("🔍 FloatingModalView appeared")
-            memoryFetcher.startListening()
         }
         .onDisappear {
             print("🔍 FloatingModalView disappeared")
@@ -79,7 +81,7 @@ struct FloatingModalView: View {
                 .font(.system(size: 17, weight: .bold, design: .rounded))
                 .foregroundColor(.primary)
             Spacer()
-            Button(action: { memoryFetcher.refreshMemories() }) {
+            Button(action: { memoryFetcher.fetchMemories() }) {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.secondary)
@@ -89,9 +91,7 @@ struct FloatingModalView: View {
                 withAnimation(.easeInOut(duration: 0.3)) {
                     isVisible.toggle()
                     if isVisible {
-                        memoryFetcher.startListening()
-                    } else {
-                        memoryFetcher.stopListening()
+                        memoryFetcher.fetchMemories()
                     }
                 }
             }) {
@@ -157,6 +157,7 @@ struct FloatingModalView: View {
             LazyVStack(spacing: 0) {
                 // Debug info
                 debugInfo
+                
                 if memoryFetcher.isLoading {
                     loadingView
                 } else if let errorMessage = memoryFetcher.errorMessage {
@@ -166,12 +167,8 @@ struct FloatingModalView: View {
                 } else {
                     ForEach(filteredMemories) { memory in
                         MemoryRowView(memory: memory) {
-                            // Hide the floating modal before inserting
-                            NotificationCenter.default.post(name: NSNotification.Name("HideFloatingModal"), object: nil)
-                            // Give time for focus to return to previous app
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                                addMemoryToInput(memory)
-                            }
+                            // Direct insertion without complex delays
+                            addMemoryToInput(memory)
                         }
                         .background(
                             RoundedRectangle(cornerRadius: 8)
@@ -214,14 +211,6 @@ struct FloatingModalView: View {
             Text("Search: '\(searchText)'")
                 .font(.system(size: 9))
                 .foregroundColor(.secondary)
-            Text("Loading: \(memoryFetcher.isLoading ? "Yes" : "No")")
-                .font(.system(size: 9))
-                .foregroundColor(.secondary)
-            if let error = memoryFetcher.errorMessage {
-                Text("Error: \(error)")
-                    .font(.system(size: 9))
-                    .foregroundColor(.red)
-            }
         }
         .padding(.vertical, 4)
         .background(Color.yellow.opacity(0.1))
@@ -280,13 +269,18 @@ struct FloatingModalView: View {
     }
     
     private func addMemoryToInput(_ memory: MemoryItem) {
-        print("🔍 Adding memory to input: \(memory.text)")
+        print("🔍 [FloatingModalView] Adding memory to input: \(memory.text)")
+        
+        // Hide the floating modal first
+        NotificationCenter.default.post(name: NSNotification.Name("HideFloatingModal"), object: nil)
+        print("🔍 [FloatingModalView] Sent HideFloatingModal notification")
         
         // Send notification to add memory to current input
         NotificationCenter.default.post(
             name: NSNotification.Name("AddMemoryToInput"),
             object: memory.text
         )
+        print("🔍 [FloatingModalView] Sent AddMemoryToInput notification with text: \(memory.text)")
         
         // Show visual feedback
         withAnimation(.easeInOut(duration: 0.3)) {
@@ -301,7 +295,7 @@ struct FloatingModalView: View {
             }
         }
         
-        print("✅ Memory sent to active text field")
+        print("✅ [FloatingModalView] Memory sent to active text field")
     }
 }
 

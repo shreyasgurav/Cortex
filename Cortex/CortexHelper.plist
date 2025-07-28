@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>AssociatedBundleIdentifiers</key>
+    <string>com.cortexagent.Cortex</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>CORTEX_AGENT_LABEL</key>
+        <string>com.cortexagent.Cortex.Helper</string>
+        <key>CORTEX_AGENT_PLIST_PATH</key>
+        <string>/Users/shreyasgurav/Library/LaunchAgents/com.cortexagent.Cortex.Helper.plist</string>
+        <key>CORTEX_BUNDLE_ID</key>
+        <string>com.cortexagent.Cortex</string>
+        <key>CORTEX_BUNDLE_NAME</key>
+        <string>Cortex</string>
+    </dict>
+    <key>KeepAlive</key>
+    <true/>
+    <key>Label</key>
+    <string>com.cortexagent.Cortex.Helper</string>
+    <key>MachServices</key>
+    <dict>
+        <key>com.cortexagent.textinjection</key>
+        <true/>
+    </dict>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Applications/Cortex.app/Contents/MacOS/Cortex</string>
+        <string>--helper</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardErrorPath</key>
+    <string>/tmp/cortex-helper.log</string>
+    <key>StandardOutPath</key>
+    <string>/tmp/cortex-helper.log</string>
+</dict>
+</plist> 

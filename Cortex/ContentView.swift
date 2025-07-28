@@ -155,18 +155,30 @@ struct ContentView: View {
                         .cornerRadius(10)
                         .shadow(color: Color.purple.opacity(0.10), radius: 6, x: 0, y: 2)
                     }
-                    Button(action: { testFirebaseConnection() }) {
+                    Button(action: {
+                        testFirebaseConnection()
+                    }) {
                         HStack {
                             Image(systemName: "wifi")
                             Text("Test Firebase")
                         }
-                        .font(.system(size: 15, weight: .medium))
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 20)
+                        .padding()
                         .background(Color.blue)
                         .foregroundColor(.white)
-                        .cornerRadius(10)
-                        .shadow(color: Color.blue.opacity(0.10), radius: 6, x: 0, y: 2)
+                        .cornerRadius(8)
+                    }
+                    
+                    Button(action: {
+                        TextInjectionService.shared.testPermissions()
+                    }) {
+                        HStack {
+                            Image(systemName: "checkmark.shield")
+                            Text("Test Permissions")
+                        }
+                        .padding()
+                        .background(Color.orange)
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
                     }
                 }
 

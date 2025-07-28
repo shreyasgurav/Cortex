@@ -4,6 +4,12 @@ import AppKit
 class FloatingModalManager: NSObject, ObservableObject {
     private var floatingWindow: NSWindow?
     @Published var isVisible = false
+    private var isWindowCreated = false
+    private var lastShowTime: Date = Date.distantPast
+    private var lastHideTime: Date = Date.distantPast
+    private var isProcessingShowHide = false
+    private var showHideQueue: [() -> Void] = []
+    private var isProcessingQueue = false
     
     override init() {
         super.init()
@@ -42,20 +48,112 @@ class FloatingModalManager: NSObject, ObservableObject {
     }
     
     func showModal() {
-        if floatingWindow == nil {
+        // Queue the operation to prevent concurrent access
+        showHideQueue.append { [weak self] in
+            self?.performShowModal()
+        }
+        
+        if !isProcessingQueue {
+            processQueue()
+        }
+    }
+    
+    private func performShowModal() {
+        // Prevent rapid show/hide cycles and concurrent operations
+        let now = Date()
+        if isProcessingShowHide {
+            print("🔍 Skipping show operation - already processing")
+            return
+        }
+        
+        if now.timeIntervalSince(lastShowTime) < 0.2 {
+            print("🔍 Skipping show operation - too soon since last show")
+            return
+        }
+        
+        if isVisible {
+            print("🔍 Skipping show operation - already visible")
+            return
+        }
+        
+        isProcessingShowHide = true
+        lastShowTime = now
+        
+        if !isWindowCreated {
             createFloatingWindow()
         }
         
+        guard let window = floatingWindow else {
+            print("🔍 Window creation failed")
+            isProcessingShowHide = false
+            return
+        }
+        
         print("🔍 Showing floating modal")
-        floatingWindow?.orderFront(nil)
-        // Keep it floating by not making it key
+        window.orderFront(nil)
         isVisible = true
+        isProcessingShowHide = false
     }
     
     func hideModal() {
+        // Queue the operation to prevent concurrent access
+        showHideQueue.append { [weak self] in
+            self?.performHideModal()
+        }
+        
+        if !isProcessingQueue {
+            processQueue()
+        }
+    }
+    
+    private func performHideModal() {
+        // Prevent rapid show/hide cycles and concurrent operations
+        let now = Date()
+        if isProcessingShowHide {
+            print("🔍 Skipping hide operation - already processing")
+            return
+        }
+        
+        if now.timeIntervalSince(lastHideTime) < 0.2 {
+            print("🔍 Skipping hide operation - too soon since last hide")
+            return
+        }
+        
+        if !isVisible {
+            print("🔍 Skipping hide operation - already hidden")
+            return
+        }
+        
+        isProcessingShowHide = true
+        lastHideTime = now
+        
+        guard let window = floatingWindow else {
+            print("🔍 Window is nil")
+            isProcessingShowHide = false
+            return
+        }
+        
         print("🔍 Hiding floating modal")
-        floatingWindow?.orderOut(nil)
+        window.orderOut(nil)
         isVisible = false
+        isProcessingShowHide = false
+    }
+    
+    private func processQueue() {
+        guard !isProcessingQueue && !showHideQueue.isEmpty else { return }
+        
+        isProcessingQueue = true
+        
+        DispatchQueue.main.async { [weak self] in
+            while let self = self, !self.showHideQueue.isEmpty {
+                let operation = self.showHideQueue.removeFirst()
+                operation()
+                
+                // Small delay between operations
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            self?.isProcessingQueue = false
+        }
     }
     
     func toggleModal() {
@@ -122,6 +220,8 @@ class FloatingModalManager: NSObject, ObservableObject {
             }
             return event
         }
+        
+        isWindowCreated = true
     }
     
     @objc private func handlePan(_ gesture: NSPanGestureRecognizer) {
@@ -184,6 +284,7 @@ extension FloatingModalManager: NSWindowDelegate {
     
     func windowWillClose(_ notification: Notification) {
         isVisible = false
+        isWindowCreated = false
     }
     
     func windowDidResignKey(_ notification: Notification) {
