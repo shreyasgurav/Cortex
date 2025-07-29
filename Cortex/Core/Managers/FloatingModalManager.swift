@@ -179,20 +179,23 @@ class FloatingModalManager: NSObject, ObservableObject {
         // Set window delegate to prevent activation
         floatingWindow?.delegate = self
         
-        // Make the entire window draggable
+        // Make the window draggable by setting its movableByWindowBackground property
+        floatingWindow?.isMovableByWindowBackground = true
+        
+        // Add a transparent overlay view to handle dragging
         let dragView = NSView()
         dragView.translatesAutoresizingMaskIntoConstraints = false
+        dragView.wantsLayer = true
+        dragView.layer?.backgroundColor = NSColor.clear.cgColor
+        dragView.isHidden = true // Hide it since we're using window's built-in dragging
         hostingView.addSubview(dragView)
         
         NSLayoutConstraint.activate([
             dragView.topAnchor.constraint(equalTo: hostingView.topAnchor),
             dragView.leadingAnchor.constraint(equalTo: hostingView.leadingAnchor),
             dragView.trailingAnchor.constraint(equalTo: hostingView.trailingAnchor),
-            dragView.heightAnchor.constraint(equalToConstant: 60) // Increased height for better dragging
+            dragView.bottomAnchor.constraint(equalTo: hostingView.bottomAnchor)
         ])
-        
-        let panGesture = NSPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
-        dragView.addGestureRecognizer(panGesture)
         
         // Add keyboard monitoring for Escape key
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -249,12 +252,28 @@ class FloatingModalManager: NSObject, ObservableObject {
             break
         }
     }
+    
+    @objc private func handleMouseDown(_ gesture: NSPanGestureRecognizer) {
+        // Backup mouse handling
+        print("🔍 Mouse down detected on drag view")
+    }
 
     deinit {
         print("🔍 FloatingModalManager deinit")
         NotificationCenter.default.removeObserver(self)
         floatingWindow?.close()
         floatingWindow = nil
+    }
+}
+
+// MARK: - NSGestureRecognizerDelegate
+extension FloatingModalManager: NSGestureRecognizerDelegate {
+    func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: NSGestureRecognizer) -> Bool {
+        return true
+    }
+    
+    func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldAttemptToRecognizeWith event: NSEvent) -> Bool {
+        return true
     }
 }
 
