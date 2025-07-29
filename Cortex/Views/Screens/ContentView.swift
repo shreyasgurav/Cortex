@@ -57,17 +57,14 @@ struct ContentView: View {
                 headerSection
                 
                 // Status Card
-                statusCard
+
                 
                 // Error Card (if needed)
                 if let errorMessage = logger.errorMessage, !errorMessage.isEmpty {
                     errorCard(message: errorMessage)
                 }
                 
-                // Last Saved Text Card (if available)
-                if !logger.lastSavedText.isEmpty {
-                    savedTextCard
-                }
+
                 
                 // Control Buttons
                 controlButtonsSection
@@ -121,10 +118,10 @@ struct ContentView: View {
                 
                 Image("Image")
                     .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 24, height: 24)
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 32, height: 32)
+                    .clipShape(Circle())
                     .foregroundColor(.white)
-                    .fontWeight(.semibold)
             }
             
             VStack(alignment: .leading, spacing: 4) {
@@ -146,45 +143,7 @@ struct ContentView: View {
         .padding(.top, 20)
     }
     
-    // MARK: - Status Card
-    private var statusCard: some View {
-        HStack(spacing: 12) {
-            // Animated status indicator
-            ZStack {
-                Circle()
-                    .stroke(Color.gray.opacity(0.3), lineWidth: 2)
-                    .frame(width: 20, height: 20)
-                
-                Circle()
-                    .fill(logger.isLogging ? Color.green : Color.red)
-                    .frame(width: 12, height: 12)
-                    .scaleEffect(logger.isLogging ? 1.2 : 1.0)
-                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: logger.isLogging)
-            }
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(logger.isLogging ? "Active" : "Inactive")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(logger.isLogging ? .green : .red)
-                
-                Text(logger.isLogging ? "Capturing keystrokes globally" : "Ready to start monitoring")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-        }
-        .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color.white.opacity(0.05))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                )
-        )
-        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
-    }
+
     
     // MARK: - Error Card
     private func errorCard(message: String) -> some View {
@@ -217,45 +176,7 @@ struct ContentView: View {
         )
     }
     
-    // MARK: - Saved Text Card
-    private var savedTextCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(.green)
-                    .font(.system(size: 16))
-                
-                Text("Last Saved")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.primary)
-                
-                Spacer()
-            }
-            
-            Text(logger.lastSavedText)
-                .font(.system(.body, design: .monospaced))
-                .padding(16)
-                .frame(minHeight: 80, alignment: .topLeading)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.green.opacity(0.05))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.green.opacity(0.2), lineWidth: 1)
-                        )
-                )
-        }
-        .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color.white.opacity(0.03))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                )
-        )
-        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
-    }
+
     
     // MARK: - Control Buttons Section
     private var controlButtonsSection: some View {

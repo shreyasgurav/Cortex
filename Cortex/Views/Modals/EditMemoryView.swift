@@ -18,37 +18,40 @@ struct EditMemoryView: View {
     }
     
     var body: some View {
-        NavigationView {
-            ZStack {
-                // Background
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(red: 0.05, green: 0.05, blue: 0.12),
-                        Color(red: 0.08, green: 0.08, blue: 0.18),
-                        Color(red: 0.12, green: 0.12, blue: 0.25)
-                    ]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+        ZStack {
+            // Background
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(red: 0.05, green: 0.05, blue: 0.12),
+                    Color(red: 0.08, green: 0.08, blue: 0.18),
+                    Color(red: 0.12, green: 0.12, blue: 0.25)
+                ]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea(.all)
+            
+            VStack(spacing: 0) {
+                // Header
+                headerSection
+                    .padding(.horizontal, 24)
+                    .padding(.top, 20)
+                    .padding(.bottom, 24)
                 
-                VStack(spacing: 24) {
-                    // Header
-                    headerSection
-                    
-                    // Memory Text Input
-                    memoryTextSection
-                    
-                    // Tags Section
-                    tagsSection
-                    
-                    Spacer()
-                    
-                    // Action Buttons
-                    actionButtonsSection
+                ScrollView {
+                    VStack(spacing: 24) {
+                        // Memory Text Input
+                        memoryTextSection
+                        
+                        // Tags Section
+                        tagsSection
+                        
+                        // Action Buttons
+                        actionButtonsSection
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 40)
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 20)
             }
         }
 
@@ -64,8 +67,8 @@ struct EditMemoryView: View {
         HStack {
             Button(action: { dismiss() }) {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 24))
-                    .foregroundColor(.white.opacity(0.7))
+                    .font(.system(size: 28))
+                    .foregroundColor(.white.opacity(0.8))
             }
             
             Spacer()
@@ -77,9 +80,8 @@ struct EditMemoryView: View {
             Spacer()
             
             // Placeholder for alignment
-            Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 24))
-                .foregroundColor(.clear)
+            Color.clear
+                .frame(width: 28, height: 28)
         }
     }
     
@@ -87,22 +89,26 @@ struct EditMemoryView: View {
     private var memoryTextSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Memory Text")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(.white)
             
-            TextEditor(text: $memoryText)
-                .font(.system(size: 16))
-                .foregroundColor(.white)
-                .padding(16)
-                .frame(minHeight: 120)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.white.opacity(0.1))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                        )
-                )
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.white.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                    )
+                    .frame(minHeight: 140)
+                
+                TextEditor(text: $memoryText)
+                    .font(.system(size: 16))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                    .padding(.bottom, 16)
+                    .background(Color.clear)
+            }
         }
     }
     
@@ -110,7 +116,7 @@ struct EditMemoryView: View {
     private var tagsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Tags (Optional)")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(.white)
             
             // Add Tag Input
@@ -124,18 +130,18 @@ struct EditMemoryView: View {
                 
                 Button(action: addTag) {
                     Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 20))
+                        .font(.system(size: 24))
                         .foregroundColor(.blue)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
             .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.white.opacity(0.1))
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.white.opacity(0.08))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
                     )
             )
             
@@ -156,9 +162,9 @@ struct EditMemoryView: View {
                                 }
                             }
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
+                            .padding(.vertical, 8)
                             .background(
-                                RoundedRectangle(cornerRadius: 16)
+                                RoundedRectangle(cornerRadius: 20)
                                     .fill(Color.blue.opacity(0.2))
                             )
                         }
@@ -171,21 +177,27 @@ struct EditMemoryView: View {
     
     // MARK: - Action Buttons Section
     private var actionButtonsSection: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 16) {
             // Save Button
             Button(action: saveMemory) {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 16))
+                        .font(.system(size: 18))
                     Text("Save Changes")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: 18, weight: .semibold))
                 }
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
+                .padding(.vertical, 18)
                 .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.blue)
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
                 )
             }
             .disabled(memoryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -195,19 +207,19 @@ struct EditMemoryView: View {
             Button(action: { dismiss() }) {
                 HStack(spacing: 8) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 16))
+                        .font(.system(size: 18))
                     Text("Cancel")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: 18, weight: .semibold))
                 }
                 .foregroundColor(.white.opacity(0.7))
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
+                .padding(.vertical, 18)
                 .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.white.opacity(0.1))
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.white.opacity(0.08))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(Color.white.opacity(0.15), lineWidth: 1)
                         )
                 )
             }
