@@ -8,8 +8,11 @@ struct ContentView: View {
     @StateObject private var memoryManager = MemoryManager()
     @StateObject private var floatingModalManager: FloatingModalManager
     @State private var showSavedMessage: Bool = false
-    @State private var showMemoryManager: Bool = false
     @State private var showAddMemorySheet: Bool = false
+    @State private var memorySearchText: String = ""
+    @State private var editingMemory: Memory?
+    @State private var showingDeleteAlert = false
+    @State private var memoryToDelete: Memory?
     
     init() {
         let memoryManager = MemoryManager()
@@ -69,8 +72,8 @@ struct ContentView: View {
                 // Control Buttons
                 controlButtonsSection
                 
-                // Memory Management Button
-                memoryManagementButton
+                // Memory Management Section
+                memoryManagementSection
                 
                 Spacer(minLength: 0)
             }
@@ -84,11 +87,21 @@ struct ContentView: View {
             memoryManager.loadMemories()
             print("🔍 [ContentView] MemoryManager loadMemories called")
         }
-        .sheet(isPresented: $showMemoryManager) {
-            MemoryManagerView(memoryManager: memoryManager)
-        }
         .sheet(isPresented: $showAddMemorySheet) {
             AddMemoryView(memoryManager: memoryManager)
+        }
+        .sheet(item: $editingMemory) { memory in
+            EditMemoryView(memory: memory, memoryManager: memoryManager)
+        }
+        .alert("Delete Memory", isPresented: $showingDeleteAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                if let memory = memoryToDelete {
+                    memoryManager.deleteMemory(memory)
+                }
+            }
+        } message: {
+            Text("Are you sure you want to delete this memory? This action cannot be undone.")
         }
     }
     
@@ -299,28 +312,130 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - Memory Management Button
-    private var memoryManagementButton: some View {
-        Button(action: { showMemoryManager = true }) {
-            HStack(spacing: 8) {
+    // MARK: - Memory Management Section
+    private var memoryManagementSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Section Header
+            HStack {
                 Image(systemName: "brain.head.profile")
-                    .font(.system(size: 16))
+                    .font(.system(size: 18))
+                    .foregroundColor(.blue)
+                
                 Text("Manage Memories")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+                
+                Spacer()
+                
+                Button(action: { showAddMemorySheet = true }) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(.blue)
+                }
             }
+            
+            // Search Bar
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.gray)
+                
+                TextField("Search memories...", text: $memorySearchText)
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .foregroundColor(.white)
+                
+                if !memorySearchText.isEmpty {
+                    Button(action: { memorySearchText = "" }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.gray)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .padding(.horizontal, 24)
             .background(
-                LinearGradient(
-                    gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.white.opacity(0.1))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    )
             )
-            .foregroundColor(.white)
-            .cornerRadius(12)
-            .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
+            
+            // Memories List
+            if memoryManager.isLoading {
+                loadingView
+            } else if filteredMemories.isEmpty {
+                emptyStateView
+            } else {
+                memoriesListView
+            }
         }
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.white.opacity(0.03))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
+        )
+        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+    }
+    
+    // MARK: - Memory Management Helper Views
+    private var filteredMemories: [Memory] {
+        memoryManager.searchMemories(query: memorySearchText)
+    }
+    
+    private var loadingView: some View {
+        HStack {
+            ProgressView()
+                .scaleEffect(1.0)
+                .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+            
+            Text("Loading memories...")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.white.opacity(0.7))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+    }
+    
+    private var emptyStateView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "brain.head.profile")
+                .font(.system(size: 32))
+                .foregroundColor(.blue.opacity(0.6))
+            
+            Text(memorySearchText.isEmpty ? "No memories yet" : "No memories found")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.white)
+            
+            Text(memorySearchText.isEmpty ? "Start capturing or add memories manually" : "Try adjusting your search terms")
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.7))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+    }
+    
+    private var memoriesListView: some View {
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(filteredMemories) { memory in
+                    MemoryCardView(
+                        memory: memory,
+                        onEdit: { editingMemory = memory },
+                        onDelete: {
+                            memoryToDelete = memory
+                            showingDeleteAlert = true
+                        }
+                    )
+                }
+            }
+        }
+        .frame(maxHeight: 300)
     }
 }
 
