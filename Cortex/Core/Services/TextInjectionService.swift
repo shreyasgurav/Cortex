@@ -5,6 +5,10 @@ import ApplicationServices
 class TextInjectionService: ObservableObject {
     static let shared = TextInjectionService()
     
+    private var permissionCache: (accessibility: Bool, automation: Bool)?
+    private var lastPermissionCheck: Date = Date.distantPast
+    private let permissionCacheTimeout: TimeInterval = 30 // Cache for 30 seconds
+    
     private init() {}
     
     // MARK: - Text Injection Methods
@@ -12,29 +16,30 @@ class TextInjectionService: ObservableObject {
     func injectText(_ text: String) {
         print("🔍 [TextInjectionService] Attempting to inject text: \(text)")
         
-        // Check permissions first
-        if !checkAccessibilityPermissions() {
-            print("❌ [TextInjectionService] No accessibility permissions - showing alert")
+        // Check permissions first (with caching)
+        let permissions = checkAllPermissions()
+        if !permissions.accessibility && !permissions.automation {
+            print("❌ [TextInjectionService] No permissions available - showing alert")
             showPermissionAlert()
             return
         }
         
-        print("✅ [TextInjectionService] Accessibility permissions confirmed")
+        print("✅ [TextInjectionService] Permissions confirmed - accessibility: \(permissions.accessibility), automation: \(permissions.automation)")
         
-        // Method 1: Try Accessibility API first
-        if injectTextViaAccessibility(text) {
+        // Method 1: Try Accessibility API first (if we have accessibility permissions)
+        if permissions.accessibility && injectTextViaAccessibility(text) {
             print("✅ [TextInjectionService] Text injected via Accessibility API")
             return
         }
         
-        // Method 2: Try AppleScript with proper permissions
-        if injectTextViaAppleScript(text) {
+        // Method 2: Try AppleScript (if we have automation permissions)
+        if permissions.automation && injectTextViaAppleScript(text) {
             print("✅ [TextInjectionService] Text injected via AppleScript")
             return
         }
         
-        // Method 3: Try Pasteboard as fallback
-        if injectTextViaPasteboard(text) {
+        // Method 3: Try Pasteboard as fallback (if we have automation permissions)
+        if permissions.automation && injectTextViaPasteboard(text) {
             print("✅ [TextInjectionService] Text injected via Pasteboard")
             return
         }
@@ -142,6 +147,22 @@ class TextInjectionService: ObservableObject {
     // MARK: - AppleScript Method
     
     private func injectTextViaAppleScript(_ text: String) -> Bool {
+        // First check if we have System Events permissions
+        let checkScript = """
+        tell application "System Events"
+            return true
+        end tell
+        """
+        
+        let checkAppleScript = NSAppleScript(source: checkScript)
+        var checkError: NSDictionary?
+        _ = checkAppleScript?.executeAndReturnError(&checkError)
+        
+        if let checkError = checkError {
+            print("❌ [TextInjectionService] System Events permission check failed: \(checkError)")
+            return false
+        }
+        
         let escapedText = text.replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\\", with: "\\\\")
         
@@ -175,6 +196,22 @@ class TextInjectionService: ObservableObject {
             return false
         }
         
+        // Check System Events permissions first
+        let checkScript = """
+        tell application "System Events"
+            return true
+        end tell
+        """
+        
+        let checkAppleScript = NSAppleScript(source: checkScript)
+        var checkError: NSDictionary?
+        _ = checkAppleScript?.executeAndReturnError(&checkError)
+        
+        if let checkError = checkError {
+            print("❌ [TextInjectionService] System Events permission check failed for pasteboard: \(checkError)")
+            return false
+        }
+        
         // Simulate Cmd+V
         let script = """
         tell application "System Events"
@@ -199,10 +236,10 @@ class TextInjectionService: ObservableObject {
     func testPermissions() {
         print("🔍 [TextInjectionService] Testing permissions...")
         
-        let hasPermissions = checkAccessibilityPermissions()
-        print("🔍 [TextInjectionService] Permission test result: \(hasPermissions)")
+        let permissions = checkAllPermissions()
+        print("🔍 [TextInjectionService] Permission test result - accessibility: \(permissions.accessibility), automation: \(permissions.automation)")
         
-        if hasPermissions {
+        if permissions.accessibility || permissions.automation {
             print("✅ [TextInjectionService] Permissions are working correctly")
         } else {
             print("❌ [TextInjectionService] Permissions are not working")
@@ -210,26 +247,69 @@ class TextInjectionService: ObservableObject {
         }
     }
     
+    private func checkAllPermissions() -> (accessibility: Bool, automation: Bool) {
+        // Check if we have cached permissions that are still valid
+        if let cache = permissionCache, 
+           Date().timeIntervalSince(lastPermissionCheck) < permissionCacheTimeout {
+            return cache
+        }
+        
+        let accessibility = checkAccessibilityPermissions()
+        let automation = checkAutomationPermissions()
+        
+        permissionCache = (accessibility: accessibility, automation: automation)
+        lastPermissionCheck = Date()
+        
+        return (accessibility: accessibility, automation: automation)
+    }
+    
+    private func checkAutomationPermissions() -> Bool {
+        let checkScript = """
+        tell application "System Events"
+            return true
+        end tell
+        """
+        
+        let appleScript = NSAppleScript(source: checkScript)
+        var error: NSDictionary?
+        let result = appleScript?.executeAndReturnError(&error)
+        
+        if let error = error {
+            print("❌ [TextInjectionService] Automation permission check failed: \(error)")
+            return false
+        }
+        
+        print("✅ [TextInjectionService] Automation permissions confirmed")
+        return result != nil
+    }
+    
+    func clearPermissionCache() {
+        permissionCache = nil
+        lastPermissionCheck = Date.distantPast
+        print("🔍 [TextInjectionService] Permission cache cleared")
+    }
+    
     private func showPermissionAlert() {
         DispatchQueue.main.async {
             let alert = NSAlert()
-            alert.messageText = "Cortex needs Accessibility permissions"
-            alert.informativeText = "To insert text into other applications, Cortex needs Accessibility permissions.\n\nPlease follow these steps:\n1. Go to System Preferences > Privacy & Security > Accessibility\n2. Click the '+' button\n3. Navigate to this exact path:\n/Users/shreyasgurav/Library/Developer/Xcode/DerivedData/Cortex-cqzmqlkfnwttsfaydnatslwiazpy/Build/Products/Debug/Cortex.app\n4. Select 'Cortex.app' and click 'Open'\n5. Make sure the toggle is ON (blue)\n6. Restart Cortex\n\nIf you've already done this, try:\n- Removing Cortex from Accessibility and adding it again\n- Restarting your Mac"
+            alert.messageText = "Cortex needs permissions"
+            alert.informativeText = "To insert text into other applications, Cortex needs two types of permissions:\n\n1. ACCESSIBILITY PERMISSIONS:\n- Go to System Preferences > Privacy & Security > Accessibility\n- Click the '+' button and add Cortex.app\n- Make sure the toggle is ON (blue)\n\n2. AUTOMATION PERMISSIONS:\n- Go to System Preferences > Privacy & Security > Automation\n- Find 'Cortex' in the list\n- Make sure 'System Events' is checked\n\nAfter granting permissions:\n- Restart Cortex\n- Try the text injection again\n\nIf you've already done this, try:\n- Removing Cortex from both permissions and adding it again\n- Restarting your Mac"
             alert.alertStyle = .warning
-            alert.addButton(withTitle: "Open System Preferences")
-            alert.addButton(withTitle: "Copy Path")
+            alert.addButton(withTitle: "Open Accessibility Settings")
+            alert.addButton(withTitle: "Open Automation Settings")
             alert.addButton(withTitle: "Test Permissions")
+            alert.addButton(withTitle: "Clear Cache & Retry")
             alert.addButton(withTitle: "Cancel")
             
             let response = alert.runModal()
             if response == .alertFirstButtonReturn {
                 NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
             } else if response == .alertSecondButtonReturn {
-                let path = "/Users/shreyasgurav/Library/Developer/Xcode/DerivedData/Cortex-cqzmqlkfnwttsfaydnatslwiazpy/Build/Products/Debug/Cortex.app"
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(path, forType: .string)
-                print("✅ Path copied to clipboard: \(path)")
+                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!)
             } else if response == .alertThirdButtonReturn {
+                self.testPermissions()
+            } else if response.rawValue == NSApplication.ModalResponse.alertThirdButtonReturn.rawValue + 1 {
+                self.clearPermissionCache()
                 self.testPermissions()
             }
         }
@@ -252,7 +332,7 @@ class TextInjectionService: ObservableObject {
             // Try to get accessibility elements for the frontmost app
             let axApp = AXUIElementCreateApplication(app.processIdentifier)
             var value: CFTypeRef?
-            let result = AXUIElementCopyAttributeValue(axApp, "AXTrusted" as CFString, &value)
+            let result = AXUIElementCopyAttributeValue(axApp, kAXFocusedUIElementAttribute as CFString, &value)
             
             print("🔍 [TextInjectionService] AXUIElementCopyAttributeValue result: \(result)")
             
@@ -264,10 +344,10 @@ class TextInjectionService: ObservableObject {
             }
         }
         
-        // Method 3: Check if we can perform basic accessibility operations
+        // Method 3: Check if we can perform basic accessibility operations on our own app
         let testElement = AXUIElementCreateApplication(NSRunningApplication.current.processIdentifier)
         var testValue: CFTypeRef?
-        let testResult = AXUIElementCopyAttributeValue(testElement, "AXTrusted" as CFString, &testValue)
+        let testResult = AXUIElementCopyAttributeValue(testElement, kAXFocusedUIElementAttribute as CFString, &testValue)
         
         print("🔍 [TextInjectionService] Self-accessibility test result: \(testResult)")
         
