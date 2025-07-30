@@ -7,7 +7,8 @@ class TextInjectionService: ObservableObject {
     
     private var permissionCache: (accessibility: Bool, automation: Bool)?
     private var lastPermissionCheck: Date = Date.distantPast
-    private let permissionCacheTimeout: TimeInterval = 30 // Cache for 30 seconds
+    private let permissionCacheTimeout: TimeInterval = 300 // Cache for 5 minutes
+    private var hasShownPermissionAlert = false
     
     private init() {}
     
@@ -19,8 +20,12 @@ class TextInjectionService: ObservableObject {
         // Check permissions first (with caching)
         let permissions = checkAllPermissions()
         if !permissions.accessibility && !permissions.automation {
-            print("❌ [TextInjectionService] No permissions available - showing alert")
-            showPermissionAlert()
+            print("❌ [TextInjectionService] No permissions available")
+            // Only show alert once per session unless cache is cleared
+            if !hasShownPermissionAlert {
+                hasShownPermissionAlert = true
+                showPermissionAlert()
+            }
             return
         }
         
@@ -45,7 +50,8 @@ class TextInjectionService: ObservableObject {
         }
         
         print("❌ [TextInjectionService] All text injection methods failed")
-        showPermissionAlert()
+        // Clear cache and try again, but don't show alert immediately
+        clearPermissionCache()
     }
     
     // MARK: - Accessibility API Method
@@ -286,6 +292,7 @@ class TextInjectionService: ObservableObject {
     func clearPermissionCache() {
         permissionCache = nil
         lastPermissionCheck = Date.distantPast
+        hasShownPermissionAlert = false
         print("🔍 [TextInjectionService] Permission cache cleared")
     }
     

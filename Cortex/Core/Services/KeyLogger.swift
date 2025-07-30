@@ -19,6 +19,7 @@ class KeyLogger: ObservableObject {
     var onError: ((String) -> Void)?
     var onTypingStarted: (() -> Void)?
     var onTypingStopped: (() -> Void)?
+    var onContextUpdate: ((String) -> Void)?
     
     private lazy var db: Firestore? = {
         guard FirebaseApp.app() != nil else { return nil }
@@ -99,9 +100,16 @@ class KeyLogger: ObservableObject {
                 }
             }
             
-            // Update UI
+            // Update UI and send context for semantic search
             DispatchQueue.main.async {
                 self.onBufferUpdate?(self.currentBuffer)
+                
+                // Send context update for semantic search (last 20 words for context)
+                let contextWords = self.currentBuffer.components(separatedBy: .whitespacesAndNewlines)
+                    .filter { !$0.isEmpty }
+                    .suffix(20)
+                let context = contextWords.joined(separator: " ")
+                self.onContextUpdate?(context)
             }
             
             // Auto-save when buffer gets long enough

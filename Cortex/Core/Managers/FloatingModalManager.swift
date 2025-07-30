@@ -11,6 +11,7 @@ class FloatingModalManager: NSObject, ObservableObject {
     private var showHideQueue: [() -> Void] = []
     private var isProcessingQueue = false
     private var memoryManager: MemoryManager
+    @Published var currentContext = ""
     
     init(memoryManager: MemoryManager) {
         print("🔍 [FloatingModalManager] Initializing with memoryManager")
@@ -40,6 +41,14 @@ class FloatingModalManager: NSObject, ObservableObject {
             name: NSNotification.Name("HideFloatingModal"),
             object: nil
         )
+        
+        // Add observer for context updates
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(updateContext),
+            name: NSNotification.Name("UpdateFloatingContext"),
+            object: nil
+        )
     }
     
     @objc private func showModalAutomatically() {
@@ -50,6 +59,19 @@ class FloatingModalManager: NSObject, ObservableObject {
     @objc private func hideModalAutomatically() {
         print("🔍 [FloatingModalManager] Auto-hiding floating modal (typing stopped)")
         hideModal()
+    }
+    
+    @objc private func updateContext(_ notification: Notification) {
+        guard let context = notification.object as? String else { 
+            print("❌ [FloatingModalManager] Invalid context notification object")
+            return 
+        }
+        DispatchQueue.main.async {
+            let oldContext = self.currentContext
+            self.currentContext = context
+            print("🔍 [FloatingModalManager] Context updated: '\(oldContext)' -> '\(context)'")
+            print("🔍 [FloatingModalManager] Modal visible: \(self.isVisible)")
+        }
     }
     
     func showModal() {
@@ -147,8 +169,8 @@ class FloatingModalManager: NSObject, ObservableObject {
     
     private func createFloatingWindow() {
         print("🔍 [FloatingModalManager] Creating floating window")
-        let contentView = FloatingModalView(memoryManager: memoryManager)
-        print("🔍 [FloatingModalManager] Created FloatingModalView with memoryManager")
+        let contentView = FloatingMemoryView(contextManager: self)
+        print("🔍 [FloatingModalManager] Created FloatingMemoryView with context manager")
         let hostingView = NSHostingView(rootView: contentView)
         
         // Get screen dimensions for flexible positioning

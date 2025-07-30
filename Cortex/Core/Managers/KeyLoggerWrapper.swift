@@ -7,6 +7,7 @@ class KeyLoggerWrapper: ObservableObject {
     @Published var lastSavedText = ""
     @Published var errorMessage: String?
     @Published var isLogging = false
+    @Published var currentContext = ""
     private var typingDebounceTimer: Timer?
     
     init() {
@@ -51,6 +52,19 @@ class KeyLoggerWrapper: ObservableObject {
                     print("🔍 [KeyLoggerWrapper] Hiding floating modal after delay")
                     NotificationCenter.default.post(name: NSNotification.Name("HideFloatingModal"), object: nil)
                 }
+            }
+        }
+        
+        keyLogger.onContextUpdate = { [weak self] context in
+            DispatchQueue.main.async {
+                self?.currentContext = context
+                print("🔍 [KeyLoggerWrapper] Context update: '\(context)'")
+                // Send context to floating modal for semantic filtering
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("UpdateFloatingContext"),
+                    object: context
+                )
+                print("🔍 [KeyLoggerWrapper] Sent UpdateFloatingContext notification")
             }
         }
     }
