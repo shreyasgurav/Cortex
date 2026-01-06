@@ -140,6 +140,14 @@ final class KeyEventListener: ObservableObject {
     
     /// Clear the shadow buffer (called on focus change, app switch, etc.)
     func clearBuffer() {
+        // Don't clear if user was typing very recently (within last 1 second)
+        // This prevents clearing buffer due to internal focus changes in Electron apps
+        if let lastTime = lastKeystrokeTime,
+           Date().timeIntervalSince(lastTime) < 1.0 {
+            print("[KeyEventListener] Skipping buffer clear - user typed recently (\(Date().timeIntervalSince(lastTime))s ago)")
+            return
+        }
+        
         if !shadowBuffer.isEmpty {
             print("[KeyEventListener] Clearing shadow buffer (was: '\(shadowBuffer.prefix(30))...')")
         }
@@ -203,7 +211,7 @@ final class KeyEventListener: ObservableObject {
         }
         
         // Regular character - add to buffer
-        if let characters = event.keyboardEventCharacters, !characters.isEmpty {
+        if let characters = getCharactersFromEvent(event), !characters.isEmpty {
             // Don't add control characters
             if !characters.unicodeScalars.allSatisfy({ CharacterSet.controlCharacters.contains($0) }) {
                 shadowBuffer += characters
@@ -231,7 +239,7 @@ final class KeyEventListener: ObservableObject {
     
     private func handleCommandShortcut(keyCode: Int64, event: CGEvent) {
         // Get the character for the key
-        guard let characters = event.keyboardEventCharacters?.lowercased() else { return }
+        guard let characters = getCharactersFromEvent(event)?.lowercased() else { return }
         
         switch characters {
         case "a":
@@ -295,19 +303,15 @@ final class KeyEventListener: ObservableObject {
     }
 }
 
-// MARK: - CGEvent extension for getting typed characters
-
-extension CGEvent {
-    /// Get the characters typed for this key event
-    var keyboardEventCharacters: String? {
-        // Try to get the Unicode string for this event
+    // MARK: - Character Extraction
+    
+    /// Get the Unicode characters typed for a key event
+    private func getCharactersFromEvent(_ event: CGEvent) -> String? {
+        // Get Unicode string from the event
         var length = 0
         var chars = [UniChar](repeating: 0, count: 4)
         
-        // Use keyboardEventAutorepeat to check if it's a repeat
-        // We want to capture repeats too
-        
-        self.keyboardGetUnicodeString(
+        event.keyboardGetUnicodeString(
             maxStringLength: 4,
             actualStringLength: &length,
             unicodeString: &chars
@@ -317,4 +321,3 @@ extension CGEvent {
         
         return String(utf16CodeUnits: chars, count: length)
     }
-}

@@ -58,11 +58,15 @@ final class AccessibilityWatcher: ObservableObject {
     /// Called when text should be captured (focus lost with recent edits)
     var onTextShouldCapture: (@MainActor (String, CaptureSource, String, String, String) -> Void)?
     
-    /// Called when focus changes to a new element (for shadow buffer clearing)
-    var onFocusChanged: (() -> Void)?
+    /// Called when focus changes to a new element
+    /// Parameters: (oldElementWasEditable, newElementIsEditable, sameApp)
+    var onFocusChanged: ((Bool, Bool, Bool) -> Void)?
     
     /// Called when app switches (for shadow buffer clearing)
     var onAppSwitched: (() -> Void)?
+    
+    /// Track previous app to detect app switches
+    private var previousAppBundleId: String = ""
     
     // MARK: - Configuration
     
@@ -183,6 +187,9 @@ final class AccessibilityWatcher: ObservableObject {
             onTextShouldCapture?(textToCapture, .appSwitch, prevAppName, prevBundleId, window)
             lastSavedTextHash = MemoryStore.hashText(textToCapture)
         }
+        
+        // Track previous app before updating
+        previousAppBundleId = currentAppBundleId
         
         // Update current app
         currentApp = newApp
@@ -329,9 +336,12 @@ final class AccessibilityWatcher: ObservableObject {
     }
     
     private func handleFocusChange(from oldElement: AXUIElement?, to newElement: AXUIElement) {
+        let oldWasEditable = isEditableFieldFocused
+        let sameApp = (previousAppBundleId == currentAppBundleId)
+        
         // Only capture if user actually typed something
         if let _ = oldElement,
-           isEditableFieldFocused,
+           oldWasEditable,
            userHasTyped,  // KEY: User must have actually typed
            let lastEdit = lastEditTime,
            Date().timeIntervalSince(lastEdit) < recentEditThreshold,
@@ -348,17 +358,33 @@ final class AccessibilityWatcher: ObservableObject {
             lastSavedTextHash = MemoryStore.hashText(textToCapture)
         }
         
-        // Reset state for new element
-        lastKnownText = ""
-        initialTextOnFocus = ""
-        userHasTyped = false
-        lastEditTime = nil
+        // Check if new element is editable BEFORE resetting state
+        let newIsEditable = isElementEditable(newElement)
         
-        // Notify that focus changed (for shadow buffer clearing)
-        onFocusChanged?()
+        // For Cursor: be more lenient - if we can read text, treat as editable
+        var actuallyEditable = newIsEditable
+        if !newIsEditable && (currentAppBundleId.contains("cursor") || currentAppBundleId.contains("Cursor")) {
+            if let text = getElementText(newElement), !text.isEmpty, !isPlaceholderText(text) {
+                actuallyEditable = true
+                print("[AccessibilityWatcher] Cursor: Treating field as editable (can read text)")
+            }
+        }
         
-        // Check if new element is editable
-        isEditableFieldFocused = isElementEditable(newElement)
+        // Only reset state if we're leaving an editable field AND not entering another editable field
+        // OR if we're switching apps
+        if !sameApp || (oldWasEditable && !actuallyEditable) {
+            // Reset state for new element
+            lastKnownText = ""
+            initialTextOnFocus = ""
+            userHasTyped = false
+            lastEditTime = nil
+        }
+        
+        // Notify that focus changed (with context for smart buffer clearing)
+        onFocusChanged?(oldWasEditable, actuallyEditable, sameApp)
+        
+        // Update editable state
+        isEditableFieldFocused = actuallyEditable
         
         // For Cursor: be more lenient - if we can read text, treat as editable
         if !isEditableFieldFocused && (currentAppBundleId.contains("cursor") || currentAppBundleId.contains("Cursor")) {

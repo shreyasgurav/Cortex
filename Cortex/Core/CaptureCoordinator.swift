@@ -62,9 +62,18 @@ final class CaptureCoordinator: ObservableObject {
             }
         }
         
-        // When AccessibilityWatcher detects focus change - clear shadow buffer
-        accessibilityWatcher.onFocusChanged = { [weak self] in
-            self?.keyEventListener.clearBuffer()
+        // When AccessibilityWatcher detects focus change - smart buffer clearing
+        accessibilityWatcher.onFocusChanged = { [weak self] oldWasEditable, newIsEditable, sameApp in
+            // Only clear buffer if:
+            // 1. We're switching apps (not same app), OR
+            // 2. We're leaving an editable field AND not entering another editable field
+            // The clearBuffer() method itself will check if user typed recently and skip if so
+            if !sameApp || (oldWasEditable && !newIsEditable) {
+                print("[CaptureCoordinator] Requesting buffer clear (app switch: \(!sameApp), left editable: \(oldWasEditable && !newIsEditable))")
+                self?.keyEventListener.clearBuffer()
+            } else {
+                print("[CaptureCoordinator] Keeping shadow buffer (same app, still in editable field)")
+            }
         }
         
         // When AccessibilityWatcher detects app switch - clear shadow buffer
