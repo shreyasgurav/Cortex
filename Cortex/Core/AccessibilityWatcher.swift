@@ -177,16 +177,16 @@ final class AccessibilityWatcher: ObservableObject {
     
     // MARK: - Placeholder Detection
     
-    /// Check if text looks like a placeholder
+    /// Check if text looks like a placeholder or non-user-input
     private func isPlaceholderText(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         
-        // Empty or very short text
-        if trimmed.isEmpty || trimmed.count < 3 {
+        // Empty text only
+        if trimmed.isEmpty {
             return true
         }
         
-        // Check against known placeholder patterns
+        // Check against known placeholder patterns (exact match or prefix)
         for pattern in placeholderPatterns {
             if trimmed == pattern || trimmed.hasPrefix(pattern) {
                 return true
@@ -196,6 +196,46 @@ final class AccessibilityWatcher: ObservableObject {
         // Check if it looks like a log message (starts with brackets)
         if trimmed.hasPrefix("[") && trimmed.contains("]") {
             return true
+        }
+        
+        // Check if it's likely a window title or app name (not user input)
+        // These are typically short and match app names or URLs without user context
+        if isLikelyWindowTitleOrURL(trimmed) {
+            return true
+        }
+        
+        return false
+    }
+    
+    /// Check if text looks like a window title, app name, or URL (not user-typed content)
+    private func isLikelyWindowTitleOrURL(_ text: String) -> Bool {
+        let appNames = [
+            "google chrome", "safari", "firefox", "cursor", "xcode", "slack",
+            "discord", "notion", "finder", "terminal", "messages", "mail",
+            "spotify", "zoom", "teams", "memorytap", "code", "visual studio"
+        ]
+        
+        // Exact match with app name
+        if appNames.contains(text) {
+            return true
+        }
+        
+        // Looks like just a domain/URL without other content
+        let urlPatterns = [".com", ".org", ".io", ".net", ".dev", "http://", "https://", "www."]
+        if text.count < 50 { // Short text that's just a URL
+            for pattern in urlPatterns {
+                if text.contains(pattern) && !text.contains(" ") {
+                    // It's a URL without spaces - probably not a user message
+                    return true
+                }
+            }
+        }
+        
+        // Just "github.com" or similar - not a message
+        if text.hasSuffix(".com") || text.hasSuffix(".io") || text.hasSuffix(".org") {
+            if !text.contains(" ") && text.count < 30 {
+                return true
+            }
         }
         
         return false
@@ -272,21 +312,21 @@ final class AccessibilityWatcher: ObservableObject {
         if isEditableFieldFocused {
             // Read initial text - this is what was already in the field
             if let text = getElementText(newElement) {
-                initialTextOnFocus = text
-                lastKnownText = text
-                print("[AccessibilityWatcher] Focused editable field in \(currentAppName), initial text: '\(text.prefix(30))...'")
+                // Only track as initial if it's not a window title/app name
+                if !isLikelyWindowTitleOrURL(text.lowercased()) {
+                    initialTextOnFocus = text
+                    lastKnownText = text
+                    print("[AccessibilityWatcher] Focused editable field in \(currentAppName), initial: '\(text.prefix(30))...'")
+                } else {
+                    // Start with empty - the text we got is probably a window title
+                    initialTextOnFocus = ""
+                    lastKnownText = ""
+                    print("[AccessibilityWatcher] Focused field in \(currentAppName), ignoring initial (looks like title): '\(text.prefix(30))...'")
+                }
             } else {
-                print("[AccessibilityWatcher] Focused editable field in \(currentAppName) but couldn't read text")
-            }
-        } else {
-            // Debug: log why field wasn't detected as editable
-            var roleValue: AnyObject?
-            let roleResult = AXUIElementCopyAttributeValue(newElement, kAXRoleAttribute as CFString, &roleValue)
-            let role = (roleResult == .success) ? (roleValue as? String ?? "unknown") : "error"
-            
-            // Only log for Cursor/VS Code to avoid spam
-            if currentAppBundleId.contains("cursor") || currentAppBundleId.contains("vscode") || currentAppBundleId.contains("Code") {
-                print("[AccessibilityWatcher] Field in \(currentAppName) not detected as editable (role: \(role))")
+                initialTextOnFocus = ""
+                lastKnownText = ""
+                print("[AccessibilityWatcher] Focused editable field in \(currentAppName) - empty or unreadable")
             }
         }
     }
@@ -324,14 +364,27 @@ final class AccessibilityWatcher: ObservableObject {
     private func trackTextChanges(in element: AXUIElement) {
         guard let currentTextValue = getElementText(element) else { return }
         
+        // Skip if text looks like a window title or app name (not user input)
+        // This prevents capturing "Google Chrome" etc. as user input
+        if isLikelyWindowTitleOrURL(currentTextValue.lowercased()) {
+            return
+        }
+        
         if currentTextValue != lastKnownText {
+            let previousText = lastKnownText
             lastKnownText = currentTextValue
             lastEditTime = Date()
             self.currentText = currentTextValue
             
-            // Check if user has typed (text is different from initial)
+            // Check if user has typed (text is different from initial AND it grew or changed meaningfully)
             if currentTextValue != initialTextOnFocus {
-                userHasTyped = true
+                // Additional check: if text grew, user is definitely typing
+                if currentTextValue.count > initialTextOnFocus.count ||
+                   currentTextValue.count > previousText.count ||
+                   !currentTextValue.hasPrefix(initialTextOnFocus) {
+                    userHasTyped = true
+                    print("[AccessibilityWatcher] Text changed: '\(currentTextValue.prefix(30))...' (typed: true)")
+                }
             }
         }
     }
@@ -518,82 +571,53 @@ final class AccessibilityWatcher: ObservableObject {
     
     /// Called when Enter key is detected - immediately capture current text
     func captureCurrentTextOnEnter() {
-        // For Cursor/editors, we might not have detected the field as editable
-        // So try to read text from current element even if not marked as editable
+        // Use the text we've been tracking - this is the most reliable approach
+        // Don't try to re-read from element as it might have changed/cleared
+        
         var textToCapture: String? = nil
         
-        if isEditableFieldFocused && userHasTyped && !lastKnownText.isEmpty {
-            // Normal case: we're tracking an editable field
+        // Primary: use tracked text if user typed something
+        if userHasTyped && !lastKnownText.isEmpty {
             textToCapture = lastKnownText
-        } else if let currentElement = currentElement {
-            // Fallback: try to read text directly from focused element
-            // This helps with Cursor/VS Code where the field might not be detected as editable
-            if let directText = getElementText(currentElement),
-               !directText.isEmpty,
-               !isPlaceholderText(directText),
-               directText.count >= 2 {
-                // Check if text changed (user typed something)
-                if directText != initialTextOnFocus {
-                    textToCapture = directText
-                    // Update our tracking state
-                    lastKnownText = directText
-                    userHasTyped = true
-                }
-            }
         }
         
+        // Validate the text is actually user content
         guard let text = textToCapture,
+              !text.isEmpty,
               !isPlaceholderText(text) else {
-            print("[AccessibilityWatcher] Enter pressed but no valid text to capture (editable: \(isEditableFieldFocused), typed: \(userHasTyped), text: '\(lastKnownText.prefix(20))...')")
+            // Debug log to help troubleshoot
+            print("[AccessibilityWatcher] Enter pressed - no valid text (editable: \(isEditableFieldFocused), typed: \(userHasTyped), tracked: '\(lastKnownText.prefix(30))...', initial: '\(initialTextOnFocus.prefix(20))...')")
             return
         }
         
+        // Capture immediately - don't wait, as the text might be cleared
         let appName = currentAppName
         let bundleId = currentAppBundleId
         let window = windowTitle
         
-        // Small delay to let the app process the Enter key first
-        // (the text might change or clear after Enter)
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
-            
-            guard let self = self else { return }
-            
-            // Re-read text after delay in case it changed
-            let finalText: String
-            if let currentElement = self.currentElement,
-               let updatedText = self.getElementText(currentElement),
-               !updatedText.isEmpty,
-               !self.isPlaceholderText(updatedText) {
-                finalText = updatedText
-            } else {
-                finalText = text
-            }
-            
-            // Check for duplicates
-            let hash = MemoryStore.hashText(finalText)
-            guard hash != self.lastSavedTextHash else {
-                print("[AccessibilityWatcher] Duplicate text, skipping")
-                return
-            }
-            
-            print("[AccessibilityWatcher] Capturing text on Enter: '\(finalText.prefix(50))...' from \(appName)")
-            
-            self.onTextShouldCapture?(
-                finalText,
-                .enterKey,
-                appName,
-                bundleId,
-                window
-            )
-            
-            self.lastSavedTextHash = hash
-            
-            // Reset state since text was "sent"
-            self.lastKnownText = ""
-            self.initialTextOnFocus = ""
-            self.userHasTyped = false
-            self.lastEditTime = nil
+        // Check for duplicates
+        let hash = MemoryStore.hashText(text)
+        guard hash != lastSavedTextHash else {
+            print("[AccessibilityWatcher] Duplicate text, skipping")
+            return
         }
+        
+        print("[AccessibilityWatcher] ✓ Capturing on Enter: '\(text.prefix(50))...' from \(appName)")
+        
+        onTextShouldCapture?(
+            text,
+            .enterKey,
+            appName,
+            bundleId,
+            window
+        )
+        
+        lastSavedTextHash = hash
+        
+        // Reset state since text was "sent"
+        lastKnownText = ""
+        initialTextOnFocus = ""
+        userHasTyped = false
+        lastEditTime = nil
     }
 }

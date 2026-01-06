@@ -123,10 +123,8 @@ final class CaptureCoordinator: ObservableObject {
             return
         }
         
-        // Skip very short text (likely accidental)
-        guard trimmedText.count >= 2 else {
-            return
-        }
+        // Note: We allow single-character messages like "k", "y", etc.
+        // Filtering is done in AccessibilityWatcher to avoid capturing junk
         
         // Create memory
         let memory = Memory(
