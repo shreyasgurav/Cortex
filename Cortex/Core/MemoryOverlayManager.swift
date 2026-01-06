@@ -8,9 +8,31 @@
 import Foundation
 import AppKit
 import SwiftUI
+import Combine
 
 @MainActor
-final class MemoryOverlayManager {
+final class MemoryOverlayManager: ObservableObject {
+    
+    enum MemoryOverlayState: Equatable {
+        case idle
+        case loading
+        case available(count: Int)
+        case empty
+        case inserting
+    }
+    
+    @Published private(set) var overlayState: MemoryOverlayState = .idle {
+        didSet {
+            print("[MemoryOverlay] State changed to: \(overlayState)")
+        }
+    }
+    
+    private var lastSearchedText: String?
+    
+    // Task to handle debounced hiding of the overlay
+    private var hideDebounceTask: Task<Void, Error>?
+    // Task to handle auto-hide after empty results
+    private var autoHideTask: Task<Void, Error>?
     
     private let contextDetector: ContextDetector
     private let searchService: MemorySearchService
@@ -31,136 +53,172 @@ final class MemoryOverlayManager {
     func updateOverlayVisibility() {
         guard AppState.shared.captureEnabled,
               !AppState.shared.privacyModeEnabled else {
-            hideOverlay()
+            hideOverlay() // Immediate hide for strict conditions
             return
         }
         
         guard let context = contextDetector.currentContext(),
               !context.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            hideOverlay()
+            
+            // Context is lost or empty. Debounce the hide to prevent flickering.
+            scheduleDebouncedHide()
             return
         }
         
+        // Context is VALID. Cancel any pending hide.
+        hideDebounceTask?.cancel()
+        hideDebounceTask = nil
+        autoHideTask?.cancel()
+        autoHideTask = nil
+        
+        // Ensure visible immediately
+        isVisible = true
+        
+        let trimmedText = context.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        
         showOverlay(with: context)
-        triggerBackgroundSearch(for: context.text)
+        
+        // Only trigger search if text has changed
+        if trimmedText != lastSearchedText {
+            print("[MemoryOverlay] Triggering search. Text changed: '\(lastSearchedText ?? "nil")' -> '\(trimmedText)'")
+            lastSearchedText = trimmedText
+            triggerBackgroundSearch(for: context.text)
+        } else {
+             // print("[MemoryOverlay] Text unchanged, skipping search")
+        }
     }
     
     private func showOverlay(with context: ContextDetector.Context?) {
-        // Button size we expect for the overlay window
-        let buttonSize = CGSize(width: 32, height: 32)
-        let margin: CGFloat = 6
+        // We always show overlay now (even for 0 results), unless explicitly hidden by other logic.
+        
+        // Fixed square size for perfect circle
+        let buttonSize = CGSize(width: 28, height: 28)
+        let margin: CGFloat = 8 // Space between cursor and button
         
         let position: CGPoint
         let primaryScreenHeight = NSScreen.screens.first?.frame.height ?? NSScreen.main?.frame.height ?? 1080
         
         if let context = context {
-            // Priority 1: Cursor Frame (Position ABOVE cursor)
-            if let cursorFrame = context.cursorFrame, cursorFrame.width > 0 && cursorFrame.height > 0 {
+            // Priority 1: Cursor-Right (User Request)
+            // We check for valid cursor frame first.
+            if let cursorFrame = context.cursorFrame, cursorFrame.height > 0 {
                 // Convert AX cursor frame (Top-Left) to Cocoa frame (Bottom-Left)
                 let cocoaCursorY = primaryScreenHeight - cursorFrame.maxY
                 let cocoaCursorFrame = CGRect(x: cursorFrame.origin.x, y: cocoaCursorY, width: cursorFrame.width, height: cursorFrame.height)
                 
-                // Find screen for cursor
                 let screen = NSScreen.screens.first { screen in
                     screen.frame.intersects(cocoaCursorFrame)
                 } ?? NSScreen.main
+                
                 let screenFrame = screen?.frame ?? CGRect(x: 0, y: 0, width: 800, height: 600)
                 
-                // Position: Centered horizontally on cursor, floating ABOVE it
-                // X: Cursor MidX - Half Button Width
-                var x = cocoaCursorFrame.midX - (buttonSize.width / 2)
-                // Y: Cursor MaxY (top in Cocoa) + margin
-                var y = cocoaCursorFrame.maxY + margin
+                // Position: Right of cursor, vertically centered
+                var x = cocoaCursorFrame.maxX + margin
+                // Center vertically relative to cursor height: CursorMidY - ButtonHalfHeight
+                var y = cocoaCursorFrame.midY - (buttonSize.height / 2)
                 
                 // Clamp inside screen
-                if x < screenFrame.minX + margin { x = screenFrame.minX + margin }
-                if x + buttonSize.width > screenFrame.maxX - margin { x = screenFrame.maxX - buttonSize.width - margin }
-                
-                // If hitting top of screen, flip to below
-                if y + buttonSize.height > screenFrame.maxY - margin {
-                    y = cocoaCursorFrame.minY - buttonSize.height - margin
-                    // Double check bottom clamp
-                    if y < screenFrame.minY + margin { y = screenFrame.minY + margin }
+                // Ensure it doesn't go off right edge
+                if x + buttonSize.width > screenFrame.maxX - margin {
+                    // If no space on right, flip to left? 
+                    // Or keep sticky? Let's just clamp to max edge
+                    x = screenFrame.maxX - buttonSize.width - margin
                 }
                 
-                position = CGPoint(x: x, y: y)
+                // Clamp vertically
+                if y < screenFrame.minY + margin { y = screenFrame.minY + margin }
+                if y + buttonSize.height > screenFrame.maxY - margin { y = screenFrame.maxY - buttonSize.height - margin }
                 
-            } 
-            // Priority 2: Element Frame (Position Bottom-Right INSIDE element)
+                position = CGPoint(x: x, y: y)
+            }
+            // Priority 2: Element Frame (Fallback) - Bottom-Right inside input
             else if let elementFrame = context.elementFrame {
-                // Convert AX element frame to Cocoa
+                // Convert AX (top-left) -> Cocoa (bottom-left)
                 let cocoaY = primaryScreenHeight - elementFrame.maxY
-                let cocoaElementFrame = CGRect(x: elementFrame.origin.x, y: cocoaY, width: elementFrame.width, height: elementFrame.height)
+                let cocoaElementFrame = CGRect(
+                    x: elementFrame.origin.x,
+                    y: cocoaY,
+                    width: elementFrame.width,
+                    height: elementFrame.height
+                )
                 
-                // Find screen
-                let screen = NSScreen.screens.first { screen in
-                    screen.frame.intersects(cocoaElementFrame)
-                } ?? NSScreen.main
-                let screenFrame = screen?.frame ?? CGRect(x: 0, y: 0, width: 800, height: 600)
+                let innerPadding: CGFloat = 8
                 
-                let innerMargin: CGFloat = 8
-                var x = cocoaElementFrame.maxX - buttonSize.width - innerMargin
-                var y = cocoaElementFrame.minY + innerMargin
-                
-                // Clamp
-                if x + buttonSize.width > screenFrame.maxX - 8 { x = screenFrame.maxX - buttonSize.width - 8 }
-                if x < screenFrame.minX + 8 { x = screenFrame.minX + 8 }
-                if y + buttonSize.height > screenFrame.maxY - 8 { y = screenFrame.maxY - buttonSize.height - 8 }
-                if y < screenFrame.minY + 8 { y = screenFrame.minY + 8 }
+                // Bottom-right INSIDE the input
+                var x = cocoaElementFrame.maxX - buttonSize.width - innerPadding
+                var y = cocoaElementFrame.minY + innerPadding
                 
                 position = CGPoint(x: x, y: y)
-                
-            } 
-            // Fallback
+            }
             else {
-                 position = CGPoint(x: 200, y: 200)
+                 // No context? Use last or default
+                 position = window?.frame.origin ?? CGPoint(x: 100, y: 100)
             }
         } else {
-            position = CGPoint(x: 200, y: 200)
+            // Default/Fallback
+            position = CGPoint(x: 100, y: 100)
         }
         
         if window == nil {
-            let hosting = NSHostingView(rootView: MemoryOverlayButtonView { [weak self] in
-                Task { @MainActor in
-                    await self?.insertRelatedMemories()
-                }
-            })
+            let win = NSPanel(contentRect: NSRect(x: position.x, y: position.y, width: buttonSize.width, height: buttonSize.height),
+                              styleMask: [.nonactivatingPanel, .borderless], // Borderless for custom shape
+                              backing: .buffered,
+                              defer: false)
             
-            let win = NSPanel(
-                contentRect: NSRect(x: position.x, y: position.y, width: buttonSize.width, height: buttonSize.height),
-                styleMask: [.nonactivatingPanel],
-                backing: .buffered,
-                defer: false
-            )
-            win.isOpaque = false
-            win.backgroundColor = .clear
             win.level = .floating
-            win.hasShadow = false
-            win.ignoresMouseEvents = false
-            win.hidesOnDeactivate = false
             win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            win.becomesKeyOnlyIfNeeded = false
+            win.backgroundColor = .clear // IMPORTANT: Clear background for the capsule shape
+            win.isOpaque = false
+            win.hasShadow = false // View has shadow
+            
+            // Create the hosting view with the manager
+            let hosting = NSHostingView(rootView: MemoryOverlayButtonView(manager: self))
             win.contentView = hosting
             
-            window = win
-            win.orderFrontRegardless()
-        } else if let win = window {
-            let frame = NSRect(x: position.x, y: position.y, width: win.frame.width, height: win.frame.height)
-            win.setFrame(frame, display: true)
-            win.orderFrontRegardless()
+            self.window = win
         }
         
-        isVisible = true
+        // Ensure window size is correct (in case we changed it or it didn't update)
+        if window?.frame.size != buttonSize {
+             window?.setContentSize(buttonSize)
+        }
+        
+        // Update position (always)
+        window?.setFrameOrigin(position)
+        
+        if !isVisible {
+            window?.orderFrontRegardless()
+            isVisible = true
+        }
     }
     
     private var searchTask: Task<Void, Never>?
     private var cachedMemories: [ExtractedMemory] = []
     
+    private func scheduleDebouncedHide() {
+        // If already scheduled, let it run
+        guard hideDebounceTask == nil else { return }
+        
+        hideDebounceTask = Task { @MainActor in
+            // Wait 500ms grace period. If context reappears, this task is cancelled.
+            try? await Task.sleep(nanoseconds: 500 * 1_000_000)
+            if Task.isCancelled { return }
+            
+            print("[MemoryOverlay] Grace period over. Hiding overlay.")
+            self.hideOverlay()
+            self.hideDebounceTask = nil
+        }
+    }
+    
     func hideOverlay() {
+        if isVisible {
+            print("[MemoryOverlay] Hiding overlay (resetting state)")
+        }
         window?.orderOut(nil)
         isVisible = false
-        // Cancel any pending search
+        lastSearchedText = nil
         searchTask?.cancel()
+        overlayState = .idle
         searchTask = nil
     }
     
@@ -171,10 +229,21 @@ final class MemoryOverlayManager {
         // Cancel existing task to debounce
         searchTask?.cancel()
         
+        // Use a slight delay before showing loading state to avoid flickering? 
+        // Or strictly strictly follow user: "Wait 700-1000ms... Only show if cachedMemories.count > 0"
+        // Actually user said: "Wait 700-1000ms after last keystroke... Only show if cachedMemories.count > 0"
+        // But also said: State 1 - Idle/Scanning... meaning "Checking memory..."
+        
         searchTask = Task { @MainActor in
-            // Debounce: wait 500ms for user to stop typing
-            try? await Task.sleep(nanoseconds: 500 * 1_000_000)
-            if Task.isCancelled { return }
+            // Debounce: wait 400ms for user to stop typing (reduce noise)
+            try? await Task.sleep(nanoseconds: 400 * 1_000_000)
+            if Task.isCancelled {
+                print("[MemoryOverlay] Search task cancelled during debounce")
+                return
+            }
+            
+            print("[MemoryOverlay] Debounce finished, setting .loading")
+            self.overlayState = .loading
             
             do {
                 // Search for related memories
@@ -183,12 +252,41 @@ final class MemoryOverlayManager {
                 
                 self.cachedMemories = memories
                 print("[MemoryOverlay] Background search found \(memories.count) related memories")
+                
+                // Show count even if 0, to be explicit
+                self.overlayState = .available(count: memories.count)
+                
+                // Helper to manage auto-hide
+                self.autoHideTask?.cancel() 
+                if memories.isEmpty {
+                   self.scheduleAutoHide()
+                }
+                
+                // Ensure window is visible
+                // Note: We removed the .empty logic, so we don't hide it anymore.
+                if self.isVisible {
+                    self.window?.orderFrontRegardless()
+                }
             } catch {
                 if !Task.isCancelled {
                     print("[MemoryOverlay] Background search failed: \(error)")
                     self.cachedMemories = []
+                    // Show error state? Or just 0?
+                    self.overlayState = .available(count: 0)
+                    // Auto-hide on error too
+                    self.scheduleAutoHide()
                 }
             }
+        }
+    }
+    
+    private func scheduleAutoHide() {
+        autoHideTask = Task { @MainActor in
+            // Wait 3 seconds then hide if still empty
+            try? await Task.sleep(nanoseconds: 3 * 1_000_000_000)
+            if Task.isCancelled { return }
+            print("[MemoryOverlay] Auto-hiding empty overlay")
+            self.hideOverlay()
         }
     }
     
@@ -196,6 +294,9 @@ final class MemoryOverlayManager {
     /// Public method to trigger memory insertion (called by button or shortcut)
     public func insertRelatedMemories() async {
         guard let context = contextDetector.currentContext() else { return }
+        
+        overlayState = .inserting
+        defer { overlayState = .idle }
         
         // Use cached memories if available and context matches (roughly)
         // Or if not available, try immediate search? 

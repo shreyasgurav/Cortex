@@ -75,6 +75,24 @@ final class ContextDetector {
                     }
                 }
             }
+            
+            // Fallback: AXSelectedTextMarkerRange (for WebKit/Electron)
+            if cursorFrame == nil {
+                var markerRangeValue: AnyObject?
+                if AXUIElementCopyAttributeValue(element, "AXSelectedTextMarkerRange" as CFString, &markerRangeValue) == .success {
+                    var boundsValue: AnyObject?
+                    if AXUIElementCopyParameterizedAttributeValue(element, "AXBoundsForRange" as CFString, markerRangeValue!, &boundsValue) == .success,
+                       let rectValue = boundsValue {
+                        let axVal = rectValue as! AXValue
+                        if AXValueGetType(axVal) == .cgRect {
+                            var cgRect = CGRect.zero
+                            if AXValueGetValue(axVal, .cgRect, &cgRect) {
+                                cursorFrame = cgRect
+                            }
+                        }
+                    }
+                }
+            }
         }
         
         return Context(

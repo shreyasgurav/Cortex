@@ -78,7 +78,10 @@ actor MemorySearchService {
             let results = try await extractedStore.searchByEmbedding(queryEmbedding: vec, topK: topK)
             
             if !results.isEmpty {
+                 // print("[MemorySearch] Found \(results.count) results via embedding for '\(text)'")
                 return results
+            } else {
+                 print("[MemorySearch] Minimal/No results via embedding for '\(text)'")
             }
         } catch {
             // Check cancellation
@@ -92,6 +95,11 @@ actor MemorySearchService {
         
         // Fallback: Content search
         let byContent = try await extractedStore.searchMemories(query: text)
+        if !byContent.isEmpty {
+             print("[MemorySearch] Found \(byContent.count) results via content search for '\(text)'")
+        } else {
+             print("[MemorySearch] No results via content search for '\(text)'")
+        }
         return Array(byContent.prefix(topK))
     }
     
