@@ -277,6 +277,26 @@ final class AccessibilityWatcher: ObservableObject {
         // If editable, track text changes
         if isEditableFieldFocused {
             trackTextChanges(in: axElement)
+        } else {
+            // For Cursor/Electron apps: try to track even if not detected as editable
+            // Sometimes the field isn't properly marked as editable but still has text
+            if currentAppBundleId.contains("cursor") || currentAppBundleId.contains("Cursor") {
+                if let text = getElementText(axElement), !text.isEmpty, !isPlaceholderText(text) {
+                    // If we're getting text but field isn't marked editable, track it anyway
+                    if lastKnownText != text {
+                        let previousText = lastKnownText
+                        lastKnownText = text
+                        lastEditTime = Date()
+                        self.currentText = text
+                        
+                        // Mark as typed if text changed
+                        if text != initialTextOnFocus && (text.count > initialTextOnFocus.count || text != previousText) {
+                            userHasTyped = true
+                            print("[AccessibilityWatcher] Cursor: Tracking text even though not marked editable: '\(text.prefix(30))...'")
+                        }
+                    }
+                }
+            }
         }
     }
     
@@ -308,6 +328,14 @@ final class AccessibilityWatcher: ObservableObject {
         
         // Check if new element is editable
         isEditableFieldFocused = isElementEditable(newElement)
+        
+        // For Cursor: be more lenient - if we can read text, treat as editable
+        if !isEditableFieldFocused && (currentAppBundleId.contains("cursor") || currentAppBundleId.contains("Cursor")) {
+            if let text = getElementText(newElement), !text.isEmpty, !isPlaceholderText(text) {
+                isEditableFieldFocused = true
+                print("[AccessibilityWatcher] Cursor: Treating field as editable (can read text)")
+            }
+        }
         
         if isEditableFieldFocused {
             // Read initial text - this is what was already in the field
@@ -571,9 +599,6 @@ final class AccessibilityWatcher: ObservableObject {
     
     /// Called when Enter key is detected - immediately capture current text
     func captureCurrentTextOnEnter() {
-        // Use the text we've been tracking - this is the most reliable approach
-        // Don't try to re-read from element as it might have changed/cleared
-        
         var textToCapture: String? = nil
         
         // Primary: use tracked text if user typed something
@@ -581,12 +606,41 @@ final class AccessibilityWatcher: ObservableObject {
             textToCapture = lastKnownText
         }
         
+        // Fallback for Cursor/Electron apps: try to read text directly from focused element
+        // Even if we didn't detect it as editable or track it properly
+        if textToCapture == nil, let currentElement = currentElement {
+            print("[AccessibilityWatcher] Enter pressed but no tracked text, trying direct read from element...")
+            
+            // Try multiple methods to get text
+            if let directText = getElementTextAggressive(currentElement),
+               !directText.isEmpty,
+               !isPlaceholderText(directText),
+               directText.count >= 2 {
+                textToCapture = directText
+                print("[AccessibilityWatcher] ✓ Found text via direct read: '\(directText.prefix(50))...'")
+            }
+        }
+        
+        // Last resort for Cursor: try reading from parent or window
+        if textToCapture == nil && (currentAppBundleId.contains("cursor") || currentAppBundleId.contains("Cursor")) {
+            print("[AccessibilityWatcher] Cursor detected - trying aggressive text search...")
+            if let windowText = tryGetTextFromCursorWindow() {
+                textToCapture = windowText
+                print("[AccessibilityWatcher] ✓ Found text from Cursor window: '\(windowText.prefix(50))...'")
+            }
+        }
+        
         // Validate the text is actually user content
         guard let text = textToCapture,
               !text.isEmpty,
               !isPlaceholderText(text) else {
             // Debug log to help troubleshoot
-            print("[AccessibilityWatcher] Enter pressed - no valid text (editable: \(isEditableFieldFocused), typed: \(userHasTyped), tracked: '\(lastKnownText.prefix(30))...', initial: '\(initialTextOnFocus.prefix(20))...')")
+            print("[AccessibilityWatcher] ✗ Enter pressed - no valid text found")
+            print("  - Editable detected: \(isEditableFieldFocused)")
+            print("  - User typed flag: \(userHasTyped)")
+            print("  - Tracked text: '\(lastKnownText.prefix(50))...'")
+            print("  - Initial text: '\(initialTextOnFocus.prefix(30))...'")
+            print("  - App: \(currentAppName) (\(currentAppBundleId))")
             return
         }
         
@@ -602,7 +656,7 @@ final class AccessibilityWatcher: ObservableObject {
             return
         }
         
-        print("[AccessibilityWatcher] ✓ Capturing on Enter: '\(text.prefix(50))...' from \(appName)")
+        print("[AccessibilityWatcher] ✓✓✓ Capturing on Enter: '\(text.prefix(50))...' from \(appName)")
         
         onTextShouldCapture?(
             text,
@@ -619,5 +673,91 @@ final class AccessibilityWatcher: ObservableObject {
         initialTextOnFocus = ""
         userHasTyped = false
         lastEditTime = nil
+    }
+    
+    /// Aggressive text reading - tries multiple methods
+    private func getElementTextAggressive(_ element: AXUIElement) -> String? {
+        // Method 1: Standard value attribute
+        if let text = getElementText(element), !text.isEmpty {
+            return text
+        }
+        
+        // Method 2: Try parent element
+        var parentValue: AnyObject?
+        if AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parentValue) == .success,
+           let parent = parentValue {
+            let parentElement = parent as! AXUIElement
+            if let parentText = getElementText(parentElement), !parentText.isEmpty {
+                return parentText
+            }
+        }
+        
+        // Method 3: Try siblings
+        var parent: AnyObject?
+        if AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parent) == .success,
+           let parentObj = parent {
+            let parentElement = parentObj as! AXUIElement
+            var childrenValue: AnyObject?
+            if AXUIElementCopyAttributeValue(parentElement, kAXChildrenAttribute as CFString, &childrenValue) == .success,
+               let children = childrenValue as? [AXUIElement] {
+                // Check all siblings
+                for sibling in children {
+                    if let siblingText = getElementText(sibling), !siblingText.isEmpty, siblingText.count > 10 {
+                        return siblingText
+                    }
+                }
+            }
+        }
+        
+        return nil
+    }
+    
+    /// Try to get text from Cursor's window when Enter is pressed
+    private func tryGetTextFromCursorWindow() -> String? {
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else { return nil }
+        
+        let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
+        
+        // Get all windows
+        var windowsValue: AnyObject?
+        guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsValue) == .success,
+              let windows = windowsValue as? [AXUIElement] else {
+            return nil
+        }
+        
+        // Try to find text in the frontmost window
+        for window in windows.prefix(3) { // Check first 3 windows
+            if let text = searchForTextInElement(window, maxDepth: 3) {
+                return text
+            }
+        }
+        
+        return nil
+    }
+    
+    /// Recursively search for text in an element and its children
+    private func searchForTextInElement(_ element: AXUIElement, maxDepth: Int) -> String? {
+        guard maxDepth > 0 else { return nil }
+        
+        // Try to get text from this element
+        if let text = getElementText(element), !text.isEmpty, text.count > 5 {
+            // Check if it looks like user input (not just UI labels)
+            if !isPlaceholderText(text) && !isLikelyWindowTitleOrURL(text.lowercased()) {
+                return text
+            }
+        }
+        
+        // Check children
+        var childrenValue: AnyObject?
+        if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenValue) == .success,
+           let children = childrenValue as? [AXUIElement] {
+            for child in children.prefix(10) { // Limit search
+                if let text = searchForTextInElement(child, maxDepth: maxDepth - 1) {
+                    return text
+                }
+            }
+        }
+        
+        return nil
     }
 }
