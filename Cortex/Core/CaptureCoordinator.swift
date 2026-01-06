@@ -306,7 +306,7 @@ final class CaptureCoordinator: ObservableObject {
             return
         }
         
-        // Create memory
+        // Create memory object (may or may not be saved depending on filtering)
         let memory = Memory(
             id: UUID().uuidString,
             createdAt: Date(),
@@ -318,7 +318,94 @@ final class CaptureCoordinator: ObservableObject {
             textHash: MemoryStore.hashText(trimmedText)
         )
         
-        // Save to database
+        // NEW: Check if we should filter before saving
+        if AppState.shared.filterBeforeSaving {
+            // AI-first approach: filter, extract, then save only worthy memories
+            await captureWithAIFiltering(memory: memory)
+        } else {
+            // Old behavior: save everything to raw database
+            await saveRawMemory(memory)
+        }
+    }
+    
+    /// AI-first filtering: Check worthiness, extract memories, save only if worthy
+    private func captureWithAIFiltering(memory: Memory) async {
+        guard let processor = memoryProcessor, processor.isEnabled else {
+            // No AI available, fall back to heuristic
+            print("[CaptureCoordinator] AI not available, using fallback heuristic")
+            await fallbackHeuristicCapture(memory)
+            return
+        }
+        
+        do {
+            print("[CaptureCoordinator] 🧠 Checking if worth remembering: '\(memory.preview)'")
+            
+            // Stage 1: Check worthiness
+            let worthiness = try await processor.checkWorthiness(memory)
+            
+            if !worthiness.isWorthRemembering {
+                print("[CaptureCoordinator] ✗ Skipped (not worth remembering): \(worthiness.reason)")
+                
+                // Log that we skipped this
+                if let store = processor.extractedMemoryStore {
+                    try? await store.logProcessing(
+                        rawMemoryId: memory.id,
+                        wasWorthRemembering: false,
+                        reason: worthiness.reason,
+                        extractedCount: 0
+                    )
+                }
+                return
+            }
+            
+            print("[CaptureCoordinator] ✓ Worth remembering! Extracting memories...")
+            
+            // Stage 2: Extract structured memories
+            let extracted = try await processor.extractMemories(memory, suggestedTypes: worthiness.suggestedTypes)
+            
+            if extracted.isEmpty {
+                print("[CaptureCoordinator] ✗ No memories extracted")
+                return
+            }
+            
+            print("[CaptureCoordinator] ✓ Extracted \(extracted.count) memories")
+            
+            // Stage 3: Save extracted memories with embeddings
+            try await processor.saveExtractedMemories(extracted, sourceMemory: memory)
+            
+            // Reload extracted memories to update UI
+            AppState.shared.loadExtractedMemories()
+            
+            // Update UI state (but don't add to raw memories list)
+            await MainActor.run {
+                lastCapturedText = memory.preview
+                captureCount += 1
+                // Note: We don't add to AppState.shared.memories since we're not saving raw
+            }
+            
+            print("[CaptureCoordinator] ✓✓✓ Saved \(extracted.count) extracted memories from \(memory.appName)")
+            
+        } catch {
+            print("[CaptureCoordinator] AI filtering failed: \(error)")
+            // Fallback to heuristic
+            await fallbackHeuristicCapture(memory)
+        }
+    }
+    
+    /// Fallback heuristic when AI is unavailable: save if text is long enough
+    private func fallbackHeuristicCapture(_ memory: Memory) async {
+        let minLength = 15 // Minimum characters for a meaningful message
+        
+        if memory.text.count >= minLength {
+            print("[CaptureCoordinator] Fallback: Text long enough (\(memory.text.count) chars), saving")
+            await saveRawMemory(memory)
+        } else {
+            print("[CaptureCoordinator] Fallback: Text too short (\(memory.text.count) chars), skipping")
+        }
+    }
+    
+    /// Save raw memory to database (old behavior, used when filtering is disabled)
+    private func saveRawMemory(_ memory: Memory) async {
         do {
             try await memoryStore.saveMemory(memory)
             
@@ -329,9 +416,9 @@ final class CaptureCoordinator: ObservableObject {
                 AppState.shared.addMemory(memory)
             }
             
-            print("[CaptureCoordinator] ✓✓✓ Saved memory from \(appName) via \(source.rawValue)")
+            print("[CaptureCoordinator] ✓✓✓ Saved raw memory from \(memory.appName) via \(memory.source.rawValue)")
             
-            // Kick off AI extraction if enabled
+            // Queue for AI processing (async, happens later)
             if let processor = memoryProcessor, processor.isEnabled {
                 Task { @MainActor in
                     await processor.queueForProcessing(memory)

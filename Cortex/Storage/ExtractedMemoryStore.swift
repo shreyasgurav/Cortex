@@ -344,14 +344,21 @@ final class ExtractedMemoryStore: @unchecked Sendable {
     }
     
     /// Semantic search using precomputed embeddings (in-memory scoring)
-    func searchByEmbedding(queryEmbedding: [Double], topK: Int = 10) async throws -> [ExtractedMemory] {
+    func searchByEmbedding(queryEmbedding: [Double], topK: Int = 10, minScore: Double = 0.6) async throws -> [ExtractedMemory] {
         let all = try await fetchAllMemories()
         let scored: [(ExtractedMemory, Double)] = all.compactMap { mem in
             guard let emb = mem.embedding else { return nil }
             let score = cosine(queryEmbedding, emb)
             return (mem, score)
         }
-        let sorted = scored.sorted { $0.1 > $1.1 }.prefix(topK).map { $0.0 }
+        
+        // Filter by minScore and sort by score descending
+        let sorted = scored
+            .filter { $0.1 >= minScore }
+            .sorted { $0.1 > $1.1 }
+            .prefix(topK)
+            .map { $0.0 }
+            
         return sorted
     }
     
@@ -452,6 +459,36 @@ final class ExtractedMemoryStore: @unchecked Sendable {
         }
     }
     
+    /// Clear all extracted memories
+    func clearAllMemories() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            queue.async { [weak self] in
+                guard let self = self, let db = self.db else {
+                    continuation.resume(throwing: ExtractedMemoryStoreError.databaseNotOpen)
+                    return
+                }
+                
+                let sql = "DELETE FROM extracted_memories"
+                var statement: OpaquePointer?
+                
+                guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                    continuation.resume(throwing: ExtractedMemoryStoreError.deleteFailed)
+                    return
+                }
+                
+                defer { sqlite3_finalize(statement) }
+                
+                guard sqlite3_step(statement) == SQLITE_DONE else {
+                    continuation.resume(throwing: ExtractedMemoryStoreError.deleteFailed)
+                    return
+                }
+                
+                print("[ExtractedMemoryStore] Cleared all memories")
+                continuation.resume()
+            }
+        }
+    }
+    
     // MARK: - Helper Methods
     
     private func extractMemoryFromRow(_ statement: OpaquePointer?) -> ExtractedMemory? {
@@ -515,6 +552,40 @@ final class ExtractedMemoryStore: @unchecked Sendable {
             embedding: embedding,
             embeddingModel: embeddingModel
         )
+    }
+
+
+    /// Check if a memory with the exact same content already exists (case-insensitive)
+    func hasMemory(withContent content: String) async throws -> Bool {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
+            queue.async { [weak self] in
+                guard let self = self, let db = self.db else {
+                    continuation.resume(throwing: ExtractedMemoryStoreError.databaseNotOpen)
+                    return
+                }
+                
+                // Use standard SQL LOWER()
+                let sql = "SELECT COUNT(*) FROM extracted_memories WHERE LOWER(content) = LOWER(?)"
+                
+                var statement: OpaquePointer?
+                
+                guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                    continuation.resume(throwing: ExtractedMemoryStoreError.prepareFailed)
+                    return
+                }
+                
+                defer { sqlite3_finalize(statement) }
+                
+                sqlite3_bind_text(statement, 1, (content as NSString).utf8String, -1, nil)
+                
+                if sqlite3_step(statement) == SQLITE_ROW {
+                    let count = sqlite3_column_int(statement, 0)
+                    continuation.resume(returning: count > 0)
+                } else {
+                    continuation.resume(returning: false)
+                }
+            }
+        }
     }
 }
 

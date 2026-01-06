@@ -31,6 +31,13 @@ final class AppState: ObservableObject {
         }
     }
     
+    /// Smart filtering - when ON, only AI-approved memories are saved
+    @Published var filterBeforeSaving: Bool = true {
+        didSet {
+            UserDefaults.standard.set(filterBeforeSaving, forKey: "filterBeforeSaving")
+        }
+    }
+    
     /// Current accessibility permission status
     @Published var hasAccessibilityPermission: Bool = false
     
@@ -39,6 +46,9 @@ final class AppState: ObservableObject {
     
     /// All captured memories (loaded from database)
     @Published var memories: [Memory] = []
+    
+    /// AI-extracted memories (structured, filtered)
+    @Published var extractedMemories: [ExtractedMemory] = []
     
     /// Whether the main memory window is shown
     @Published var showMemoryWindow: Bool = false
@@ -58,6 +68,7 @@ final class AppState: ObservableObject {
     
     // MARK: - Dependencies
     private var memoryStore: MemoryStore?
+    private var extractedMemoryStore: ExtractedMemoryStore?
     
     // MARK: - Initialization
     
@@ -69,6 +80,14 @@ final class AppState: ObservableObject {
             UserDefaults.standard.set(true, forKey: "hasLaunchedBefore")
         }
         privacyModeEnabled = UserDefaults.standard.bool(forKey: "privacyModeEnabled")
+        
+        // Load filter preference (default to true for smart filtering)
+        if UserDefaults.standard.object(forKey: "filterBeforeSaving") == nil {
+            filterBeforeSaving = true
+            UserDefaults.standard.set(true, forKey: "filterBeforeSaving")
+        } else {
+            filterBeforeSaving = UserDefaults.standard.bool(forKey: "filterBeforeSaving")
+        }
     }
     
     // MARK: - Setup
@@ -76,6 +95,11 @@ final class AppState: ObservableObject {
     func setup(memoryStore: MemoryStore) {
         self.memoryStore = memoryStore
         loadMemories()
+    }
+    
+    func setupExtractedStore(_ store: ExtractedMemoryStore) {
+        self.extractedMemoryStore = store
+        loadExtractedMemories()
     }
     
     // MARK: - Memory Operations
@@ -87,10 +111,31 @@ final class AppState: ObservableObject {
                 let loaded = try await store.fetchAllMemories()
                 await MainActor.run {
                     self.memories = loaded
-                    self.captureCount = loaded.count
+                    // Only update count from raw memories if filtering is OFF
+                    if !filterBeforeSaving {
+                        self.captureCount = loaded.count
+                    }
                 }
             } catch {
                 print("Failed to load memories: \(error)")
+            }
+        }
+    }
+    
+    func loadExtractedMemories() {
+        guard let store = extractedMemoryStore else { return }
+        Task {
+            do {
+                let loaded = try await store.fetchAllMemories()
+                await MainActor.run {
+                    self.extractedMemories = loaded
+                    // Update count from extracted memories if filtering is ON
+                    if filterBeforeSaving {
+                        self.captureCount = loaded.count
+                    }
+                }
+            } catch {
+                print("Failed to load extracted memories: \(error)")
             }
         }
     }
@@ -117,17 +162,35 @@ final class AppState: ObservableObject {
     }
     
     func clearAllMemories() {
-        guard let store = memoryStore else { return }
-        Task {
-            do {
-                try await store.clearAllMemories()
-                await MainActor.run {
-                    memories.removeAll()
-                    captureCount = 0
-                    lastCapturedPreview = ""
+        if filterBeforeSaving {
+            // Clear extracted memories when filtering is ON
+            guard let store = extractedMemoryStore else { return }
+            Task {
+                do {
+                    try await store.clearAllMemories()
+                    await MainActor.run {
+                        extractedMemories.removeAll()
+                        captureCount = 0
+                        lastCapturedPreview = ""
+                    }
+                } catch {
+                    print("Failed to clear extracted memories: \(error)")
                 }
-            } catch {
-                print("Failed to clear memories: \(error)")
+            }
+        } else {
+            // Clear raw memories when filtering is OFF
+            guard let store = memoryStore else { return }
+            Task {
+                do {
+                    try await store.clearAllMemories()
+                    await MainActor.run {
+                        memories.removeAll()
+                        captureCount = 0
+                        lastCapturedPreview = ""
+                    }
+                } catch {
+                    print("Failed to clear memories: \(error)")
+                }
             }
         }
     }

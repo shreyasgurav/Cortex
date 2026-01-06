@@ -48,11 +48,30 @@ struct MemoryWindowView: View {
             if filteredMemories.isEmpty {
                 emptyListView
             } else {
-                List(filteredMemories, selection: $selectedMemory) { memory in
-                    MemoryRowView(memory: memory, isSelected: selectedMemory?.id == memory.id)
-                        .tag(memory)
+                if appState.filterBeforeSaving {
+                    // Show extracted memories
+                    List(filteredExtractedMemories, selection: $selectedMemory) { memory in
+                        ExtractedMemoryRowView(memory: memory)
+                            .tag(Memory(
+                                id: memory.id,
+                                createdAt: memory.createdAt,
+                                appBundleId: "",
+                                appName: memory.sourceApp,
+                                windowTitle: "",
+                                source: .enterKey,
+                                text: memory.content,
+                                textHash: ""
+                            ))
+                    }
+                    .listStyle(.sidebar)
+                } else {
+                    // Show raw memories
+                    List(filteredRawMemories, selection: $selectedMemory) { memory in
+                        MemoryRowView(memory: memory, isSelected: selectedMemory?.id == memory.id)
+                            .tag(memory)
+                    }
+                    .listStyle(.sidebar)
                 }
-                .listStyle(.sidebar)
             }
             
             Divider()
@@ -83,7 +102,7 @@ struct MemoryWindowView: View {
         .cornerRadius(8)
     }
     
-    private var filteredMemories: [Memory] {
+    private var filteredRawMemories: [Memory] {
         if searchText.isEmpty {
             return appState.memories
         }
@@ -95,9 +114,29 @@ struct MemoryWindowView: View {
         }
     }
     
+    private var filteredExtractedMemories: [ExtractedMemory] {
+        if searchText.isEmpty {
+            return appState.extractedMemories
+        }
+        
+        let lowercasedSearch = searchText.lowercased()
+        return appState.extractedMemories.filter { memory in
+            memory.content.lowercased().contains(lowercasedSearch) ||
+            memory.sourceApp.lowercased().contains(lowercasedSearch) ||
+            memory.type.displayName.lowercased().contains(lowercasedSearch) ||
+            memory.tags.contains(where: { $0.lowercased().contains(lowercasedSearch) })
+        }
+    }
+    
+    private var filteredMemories: [Any] {
+        appState.filterBeforeSaving ? filteredExtractedMemories : filteredRawMemories
+    }
+    
     private var listFooter: some View {
-        HStack {
-            Text("\(appState.memories.count) memories")
+        let memoryCount = appState.filterBeforeSaving ? appState.extractedMemories.count : appState.memories.count
+        
+        return HStack {
+            Text("\(memoryCount) memories")
                 .font(.caption)
                 .foregroundColor(.secondary)
             
@@ -109,7 +148,7 @@ struct MemoryWindowView: View {
             }
             .buttonStyle(.plain)
             .foregroundColor(.red)
-            .disabled(appState.memories.isEmpty)
+            .disabled(memoryCount == 0)
         }
         .padding(12)
         .alert("Clear All Memories?", isPresented: $showDeleteConfirmation) {
@@ -119,7 +158,7 @@ struct MemoryWindowView: View {
                 selectedMemory = nil
             }
         } message: {
-            Text("This action cannot be undone. All \(appState.memories.count) memories will be permanently deleted.")
+            Text("This action cannot be undone. All \(memoryCount) memories will be permanently deleted.")
         }
     }
     
@@ -175,77 +214,12 @@ struct MemoryRowView: View {
     let isSelected: Bool
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // App name and time
-            HStack {
-                Label(memory.appName, systemImage: appIcon)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                Spacer()
-                
-                Text(memory.formattedDate)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-            
-            // Preview text
-            Text(memory.preview)
-                .font(.subheadline)
-                .lineLimit(2)
-                .foregroundColor(.primary)
-            
-            // Source badge
-            HStack {
-                sourceLabel
-                Spacer()
-            }
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-    }
-    
-    private var appIcon: String {
-        // Map common apps to icons
-        switch memory.appBundleId {
-        case let id where id.contains("slack"):
-            return "bubble.left.and.bubble.right"
-        case let id where id.contains("discord"):
-            return "bubble.left"
-        case let id where id.contains("messages"):
-            return "message"
-        case let id where id.contains("mail"):
-            return "envelope"
-        case let id where id.contains("cursor"), let id where id.contains("vscode"):
-            return "chevron.left.forwardslash.chevron.right"
-        case let id where id.contains("notion"):
-            return "doc.text"
-        case let id where id.contains("safari"), let id where id.contains("chrome"), let id where id.contains("firefox"):
-            return "globe"
-        default:
-            return "app"
-        }
-    }
-    
-    private var sourceLabel: some View {
-        let (icon, color): (String, Color) = {
-            switch memory.source {
-            case .enterKey:
-                return ("return", .green)
-            case .focusLost:
-                return ("arrow.right.circle", .blue)
-            case .appSwitch:
-                return ("arrow.triangle.2.circlepath", .purple)
-            }
-        }()
-        
-        return Label(memory.source.displayName, systemImage: icon)
-            .font(.caption2)
-            .foregroundColor(color.opacity(0.8))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.1))
-            .cornerRadius(4)
+        Text(memory.text)
+            .font(.subheadline)
+            .lineLimit(3)
+            .foregroundColor(.primary)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
     }
 }
 
@@ -286,7 +260,7 @@ struct MemoryDetailView: View {
     private var detailHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label(memory.appName, systemImage: "app")
+                Text(memory.appName)
                     .font(.headline)
                 
                 Spacer()
@@ -302,27 +276,6 @@ struct MemoryDetailView: View {
                     .foregroundColor(.secondary)
                     .lineLimit(1)
             }
-            
-            HStack(spacing: 12) {
-                Label(memory.source.displayName, systemImage: sourceIcon)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                Text("•")
-                    .foregroundColor(.secondary)
-                
-                Text("\(memory.text.count) characters")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-        }
-    }
-    
-    private var sourceIcon: String {
-        switch memory.source {
-        case .enterKey: return "return"
-        case .focusLost: return "arrow.right.circle"
-        case .appSwitch: return "arrow.triangle.2.circlepath"
         }
     }
     
@@ -358,6 +311,21 @@ struct MemoryDetailView: View {
                 showCopied = false
             }
         }
+    }
+}
+
+// MARK: - Extracted Memory Row
+
+struct ExtractedMemoryRowView: View {
+    let memory: ExtractedMemory
+    
+    var body: some View {
+        Text(memory.content)
+            .font(.subheadline)
+            .lineLimit(3)
+            .foregroundColor(.primary)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
     }
 }
 

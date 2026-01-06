@@ -18,7 +18,7 @@ final class MemoryInsertService {
     func insertMemories(_ memories: [ExtractedMemory]) {
         guard !memories.isEmpty else { return }
         
-        let header = "These are related memories:\n"
+        let header = "\n\nThese are relatable memories:\n"
         let bulletLines = memories.map { "- \($0.content)" }.joined(separator: "\n")
         let block = header + bulletLines + "\n"
         

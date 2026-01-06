@@ -26,7 +26,7 @@ final class MemoryProcessor: ObservableObject {
     
     private var llmService: LLMService
     private var config: LLMConfig
-    private var extractedMemoryStore: ExtractedMemoryStore?
+    internal var extractedMemoryStore: ExtractedMemoryStore?  // Internal so CaptureCoordinator can access
     private var embeddingService: EmbeddingService
     
     // MARK: - Queue for processing
@@ -146,6 +146,69 @@ final class MemoryProcessor: ObservableObject {
                 await processQueue()
             }
         }
+    }
+    
+    /// Save extracted memories directly with embeddings (used for AI-first filtering)
+    func saveExtractedMemories(_ memoriesData: [ExtractedMemoryData], sourceMemory: Memory) async throws {
+        guard let store = extractedMemoryStore else {
+            print("[MemoryProcessor] No extracted memory store available")
+            return
+        }
+        
+        var enriched: [(memory: ExtractedMemory, embedding: [Double]?, embeddingModel: String?)] = []
+        
+        for data in memoriesData {
+            // Check for duplicates before generating embeddings
+            do {
+                if try await store.hasMemory(withContent: data.content) {
+                    print("[MemoryProcessor] Skipping duplicate memory: \(data.content.prefix(50))...")
+                    continue
+                }
+            } catch {
+                print("[MemoryProcessor] Failed to check for duplicate: \(error)")
+            }
+            // Generate embedding
+            let embeddingResult: ([Double]?, String?)
+            if isEnabled {
+                do {
+                    let (vec, model) = try await embeddingService.embed(text: data.content)
+                    embeddingResult = (vec, model)
+                    print("[MemoryProcessor] ✓ Generated embedding for: \(data.content.prefix(50))...")
+                } catch {
+                    print("[MemoryProcessor] Embedding failed: \(error)")
+                    embeddingResult = (nil, nil)
+                }
+            } else {
+                embeddingResult = (nil, nil)
+            }
+            
+            let mem = ExtractedMemory(
+                id: UUID().uuidString,
+                createdAt: Date(),
+                content: data.content,
+                type: data.type,
+                confidence: data.confidence,
+                tags: data.tags,
+                sourceMemoryId: sourceMemory.id,
+                sourceApp: sourceMemory.appName,
+                isActive: true,
+                expiresAt: data.expiresAt,
+                relatedMemoryIds: [],
+                embedding: embeddingResult.0,
+                embeddingModel: embeddingResult.1
+            )
+            enriched.append((mem, embeddingResult.0, embeddingResult.1))
+        }
+        
+        try await store.saveMemories(enriched)
+        try await store.logProcessing(
+            rawMemoryId: sourceMemory.id,
+            wasWorthRemembering: true,
+            reason: nil,
+            extractedCount: enriched.count
+        )
+        
+        print("[MemoryProcessor] ✓ Saved \(enriched.count) extracted memories with embeddings")
     }
     
     /// Process all queued memories

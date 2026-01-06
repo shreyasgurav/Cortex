@@ -114,6 +114,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Initialize extracted memory store (AI-processed)
         do {
             extractedMemoryStore = try ExtractedMemoryStore()
+            AppState.shared.setupExtractedStore(extractedMemoryStore!)
         } catch {
             print("[Cortex] Failed to initialize extracted memory store: \(error)")
         }
