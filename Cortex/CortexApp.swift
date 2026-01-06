@@ -110,6 +110,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         permissionsManager = PermissionsManager()
         accessibilityWatcher = AccessibilityWatcher()
         keyEventListener = KeyEventListener()
+        // Connect keyboard shortcut (Control+M)
+        keyEventListener?.onInsertShortcutPressed = { [weak self] in
+            Task { @MainActor in
+                await self?.memoryOverlayManager?.insertRelatedMemories()
+            }
+        }
+        
+        // Start listening
+        keyEventListener?.start()
         
         // Initialize extracted memory store (AI-processed)
         do {
@@ -146,10 +155,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let contextDetector = ContextDetector(accessibilityWatcher: watcher)
                 // Reuse MemoryProcessor's embedding service indirectly via new one configured from env
                 let embedService = EmbeddingService()
+                let llmService = LLMService() // Assuming LLMService is available and can be initialized
                 Task {
                     await embedService.configureFromEnv(llmProvider: .openai)
+                    await llmService.configureFromEnv(llmProvider: .openai)
                 }
-                let searchService = MemorySearchService(embeddingService: embedService, extractedStore: extractedStore)
+                let searchService = MemorySearchService(embeddingService: embedService, extractedStore: extractedStore, llmService: llmService)
                 let insertService = MemoryInsertService()
                 memoryOverlayManager = MemoryOverlayManager(
                     contextDetector: contextDetector,

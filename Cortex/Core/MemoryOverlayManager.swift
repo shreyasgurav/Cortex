@@ -41,73 +41,80 @@ final class MemoryOverlayManager {
             return
         }
         
-        showOverlay(near: context.elementFrame)
+        showOverlay(with: context)
         triggerBackgroundSearch(for: context.text)
     }
     
-    private func showOverlay(near elementFrame: CGRect?) {
+    private func showOverlay(with context: ContextDetector.Context?) {
         // Button size we expect for the overlay window
         let buttonSize = CGSize(width: 32, height: 32)
         let margin: CGFloat = 6
         
         let position: CGPoint
+        let primaryScreenHeight = NSScreen.screens.first?.frame.height ?? NSScreen.main?.frame.height ?? 1080
         
-        if let elementFrame = elementFrame {
-            // AX coordinates are Top-Left relative to main screen
-            // Cocoa coordinates are Bottom-Left relative to main screen
-            // We need to flip Y using the primary screen height
-            
-            // Get the primary screen (index 0 usually contains the origin)
-            // Or just use the union of all screens height? 
-            // Standard approach: use NSScreen.screens[0].frame.height if assuming global coords.
-            // But easier: `NSScreen.main` usually works for single screen contexts.
-            // Let's use NSScreen.main?.frame.height for the flip reference.
-            
-            let primaryScreenHeight = NSScreen.screens.first?.frame.height ?? NSScreen.main?.frame.height ?? 1080
-            
-            // Convert AX element frame (Top-Left) to Cocoa frame (Bottom-Left)
-            // AX Y is distance from top.
-            // Cocoa Y = Height - AX Y - HeightElement aka Height - (AX Y + HeightElement) = Height - AX MaxY
-            let cocoaY = primaryScreenHeight - elementFrame.maxY
-            let cocoaElementFrame = CGRect(x: elementFrame.origin.x, y: cocoaY, width: elementFrame.width, height: elementFrame.height)
-            
-            // Now find which screen this cocoa frame is on
-            let screen = NSScreen.screens.first { screen in
-                screen.frame.intersects(cocoaElementFrame)
-            } ?? NSScreen.main
-            
-            let screenFrame = screen?.frame ?? CGRect(x: 0, y: 0, width: 800, height: 600)
-            
-            // Position: Bottom-Right corner inside the element (Grammarly style)
-            let innerMargin: CGFloat = 8
-            
-            // X: Right edge of element (same in both systems) - button width - margin
-            var x = cocoaElementFrame.maxX - buttonSize.width - innerMargin
-            
-            // Y: Bottom edge of element (cocoaY) + margin (move up)
-            var y = cocoaElementFrame.minY + innerMargin
-            
-            // Clamp inside screen horizontally
-            if x + buttonSize.width > screenFrame.maxX - margin {
-                x = screenFrame.maxX - buttonSize.width - margin
+        if let context = context {
+            // Priority 1: Cursor Frame (Position ABOVE cursor)
+            if let cursorFrame = context.cursorFrame, cursorFrame.width > 0 && cursorFrame.height > 0 {
+                // Convert AX cursor frame (Top-Left) to Cocoa frame (Bottom-Left)
+                let cocoaCursorY = primaryScreenHeight - cursorFrame.maxY
+                let cocoaCursorFrame = CGRect(x: cursorFrame.origin.x, y: cocoaCursorY, width: cursorFrame.width, height: cursorFrame.height)
+                
+                // Find screen for cursor
+                let screen = NSScreen.screens.first { screen in
+                    screen.frame.intersects(cocoaCursorFrame)
+                } ?? NSScreen.main
+                let screenFrame = screen?.frame ?? CGRect(x: 0, y: 0, width: 800, height: 600)
+                
+                // Position: Centered horizontally on cursor, floating ABOVE it
+                // X: Cursor MidX - Half Button Width
+                var x = cocoaCursorFrame.midX - (buttonSize.width / 2)
+                // Y: Cursor MaxY (top in Cocoa) + margin
+                var y = cocoaCursorFrame.maxY + margin
+                
+                // Clamp inside screen
+                if x < screenFrame.minX + margin { x = screenFrame.minX + margin }
+                if x + buttonSize.width > screenFrame.maxX - margin { x = screenFrame.maxX - buttonSize.width - margin }
+                
+                // If hitting top of screen, flip to below
+                if y + buttonSize.height > screenFrame.maxY - margin {
+                    y = cocoaCursorFrame.minY - buttonSize.height - margin
+                    // Double check bottom clamp
+                    if y < screenFrame.minY + margin { y = screenFrame.minY + margin }
+                }
+                
+                position = CGPoint(x: x, y: y)
+                
+            } 
+            // Priority 2: Element Frame (Position Bottom-Right INSIDE element)
+            else if let elementFrame = context.elementFrame {
+                // Convert AX element frame to Cocoa
+                let cocoaY = primaryScreenHeight - elementFrame.maxY
+                let cocoaElementFrame = CGRect(x: elementFrame.origin.x, y: cocoaY, width: elementFrame.width, height: elementFrame.height)
+                
+                // Find screen
+                let screen = NSScreen.screens.first { screen in
+                    screen.frame.intersects(cocoaElementFrame)
+                } ?? NSScreen.main
+                let screenFrame = screen?.frame ?? CGRect(x: 0, y: 0, width: 800, height: 600)
+                
+                let innerMargin: CGFloat = 8
+                var x = cocoaElementFrame.maxX - buttonSize.width - innerMargin
+                var y = cocoaElementFrame.minY + innerMargin
+                
+                // Clamp
+                if x + buttonSize.width > screenFrame.maxX - 8 { x = screenFrame.maxX - buttonSize.width - 8 }
+                if x < screenFrame.minX + 8 { x = screenFrame.minX + 8 }
+                if y + buttonSize.height > screenFrame.maxY - 8 { y = screenFrame.maxY - buttonSize.height - 8 }
+                if y < screenFrame.minY + 8 { y = screenFrame.minY + 8 }
+                
+                position = CGPoint(x: x, y: y)
+                
+            } 
+            // Fallback
+            else {
+                 position = CGPoint(x: 200, y: 200)
             }
-            if x < screenFrame.minX + margin {
-                x = screenFrame.minX + margin
-            }
-            
-            // Clamp inside screen vertically
-            if y + buttonSize.height > screenFrame.maxY - margin {
-                y = screenFrame.maxY - buttonSize.height - margin
-            }
-            if y < screenFrame.minY + margin {
-                y = screenFrame.minY + margin
-            }
-            
-            position = CGPoint(x: x, y: y)
-        } else if let screenFrame = NSScreen.main?.frame {
-            // Fallback: center of main screen
-            position = CGPoint(x: screenFrame.midX - buttonSize.width / 2,
-                               y: screenFrame.midY - buttonSize.height / 2)
         } else {
             position = CGPoint(x: 200, y: 200)
         }
@@ -115,7 +122,7 @@ final class MemoryOverlayManager {
         if window == nil {
             let hosting = NSHostingView(rootView: MemoryOverlayButtonView { [weak self] in
                 Task { @MainActor in
-                    await self?.handleButtonTap()
+                    await self?.insertRelatedMemories()
                 }
             })
             
@@ -185,7 +192,9 @@ final class MemoryOverlayManager {
         }
     }
     
-    private func handleButtonTap() async {
+    
+    /// Public method to trigger memory insertion (called by button or shortcut)
+    public func insertRelatedMemories() async {
         guard let context = contextDetector.currentContext() else { return }
         
         // Use cached memories if available and context matches (roughly)

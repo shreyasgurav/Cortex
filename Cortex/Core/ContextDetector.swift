@@ -25,6 +25,7 @@ final class ContextDetector {
         let bundleId: String
         let windowTitle: String
         let elementFrame: CGRect?
+        let cursorFrame: CGRect?
     }
     
     /// Best-effort: current text context + approximate bounds of focused element
@@ -55,12 +56,34 @@ final class ContextDetector {
             }
         }
         
+        // Try to get actual cursor/caret selection bounds
+        var cursorFrame: CGRect? = nil
+        if let element = accessibilityWatcher.currentAXElement() {
+            var rangeValue: AnyObject?
+            // 1. Get SelectedTextRange
+            if AXUIElementCopyAttributeValue(element, "AXSelectedTextRange" as CFString, &rangeValue) == .success {
+                // 2. Use that range to get BoundsForRange
+                var boundsValue: AnyObject?
+                if AXUIElementCopyParameterizedAttributeValue(element, "AXBoundsForRange" as CFString, rangeValue!, &boundsValue) == .success,
+                   let rectValue = boundsValue {
+                    let axVal = rectValue as! AXValue
+                    if AXValueGetType(axVal) == .cgRect {
+                        var cgRect = CGRect.zero
+                        if AXValueGetValue(axVal, .cgRect, &cgRect) {
+                            cursorFrame = cgRect
+                        }
+                    }
+                }
+            }
+        }
+        
         return Context(
             text: text,
             appName: appName,
             bundleId: bundleId,
             windowTitle: windowTitle,
-            elementFrame: frame
+            elementFrame: frame,
+            cursorFrame: cursorFrame
         )
     }
 }

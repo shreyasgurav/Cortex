@@ -35,7 +35,7 @@ final class MemoryInsertService {
         simulateCmdV()
         
         // Restore clipboard after short delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             if let existing = existing {
                 pasteboard.clearContents()
                 pasteboard.setString(existing, forType: .string)
@@ -49,18 +49,31 @@ final class MemoryInsertService {
         guard let source = CGEventSource(stateID: .hidSystemState) else { return }
         
         let keyV: CGKeyCode = CGKeyCode(kVK_ANSI_V)
-        let flags: CGEventFlags = [.maskCommand]
         
-        if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyV, keyDown: true) {
-            keyDown.flags = flags
-            keyDown.post(tap: .cghidEventTap)
+        // Create events
+        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyV, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyV, keyDown: false) else {
+            return
         }
         
-        if let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyV, keyDown: false) {
-            keyUp.flags = flags
-            keyUp.post(tap: .cghidEventTap)
-        }
+        // Set flags
+        keyDown.flags = [.maskCommand]
+        keyUp.flags = [.maskCommand]
+        
+        // Post events with delay
+        keyDown.post(tap: .cghidEventTap)
+        
+        // Small delay to ensure app registers the key down state
+        usleep(10000) // 10ms
+        
+        keyUp.post(tap: .cghidEventTap)
     }
+    
+    // Increased delay for cleanup
+    // Restore clipboard after short delay
+    // DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) -> Increased to 0.5
+    // Actually, in insertMemories:
+    // DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) ...
 }
 
 

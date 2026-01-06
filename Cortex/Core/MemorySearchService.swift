@@ -11,64 +11,107 @@ actor MemorySearchService {
     
     private let embeddingService: EmbeddingService
     private let extractedStore: ExtractedMemoryStore
+    private let llmService: LLMService
     
-    init(embeddingService: EmbeddingService, extractedStore: ExtractedMemoryStore) {
+    init(embeddingService: EmbeddingService, extractedStore: ExtractedMemoryStore, llmService: LLMService) {
         self.embeddingService = embeddingService
         self.extractedStore = extractedStore
+        self.llmService = llmService
     }
     
     /// Semantic search for memories related to given text.
-    /// Tries embeddings first; if that fails or returns nothing, falls back to
-    /// simple content-based search.
+    /// Uses LLM to extract key search queries for better accuracy.
     func searchRelatedMemories(for text: String, topK: Int = 5) async throws -> [ExtractedMemory] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
         
+        var searchQueries = [trimmed]
+        
+        // If text is long enough, generate specific search queries
+        // Simple heuristic: > 5 words
+        if trimmed.split(separator: " ").count > 5 {
+            let extracted = await generateSearchQueries(from: trimmed)
+            if !extracted.isEmpty {
+                print("[MemorySearch] Extracted queries: \(extracted)")
+                searchQueries.append(contentsOf: extracted)
+            }
+        }
+        
+        // Use a set to track unique memory IDs
+        var uniqueMemories: [String: ExtractedMemory] = [:]
+        
+        // Perform searches in parallel
+        // We use a task group
+        await withTaskGroup(of: [ExtractedMemory].self) { group in
+            for query in searchQueries {
+                group.addTask {
+                    do {
+                        return try await self.searchSingleQuery(query, topK: topK)
+                    } catch {
+                        print("[MemorySearch] Query failed for '\(query)': \(error)")
+                        return []
+                    }
+                }
+            }
+            
+            for await results in group {
+                for memory in results {
+                    uniqueMemories[memory.id] = memory
+                }
+            }
+        }
+        
+        // Convert to array and maybe sort by relevance?
+        // Since we don't have unified scores easily, let's just return unique ones
+        // If we had scores, we could re-rank.
+        // For now, simple de-duplication is a big step up.
+        
+        let finalResults = Array(uniqueMemories.values)
+        print("[MemorySearch] Total unique memories found: \(finalResults.count)")
+        return finalResults
+    }
+    
+    private func searchSingleQuery(_ text: String, topK: Int) async throws -> [ExtractedMemory] {
         // Try embedding-based search
-        var anyResults: [ExtractedMemory] = []
         do {
-            let (vec, _) = try await embeddingService.embed(text: trimmed)
-            // Use a threshold to ensure relevance (0.6 is a reasonable starting point for cosine sim)
+            let (vec, _) = try await embeddingService.embed(text: text)
             let results = try await extractedStore.searchByEmbedding(queryEmbedding: vec, topK: topK)
             
-            // Check relevance - since searchByEmbedding returns top K sorted, we might need to verify scores
-            // But searchByEmbedding doesn't return scores currently. 
-            // We should trust the store or update store to return scores.
-            // For now, let's assume specific threshold filtering inside the store or just rely on the top match being good enough?
-            // Actually, better to update the store to filter, but let's just trust top results 
-            // provided they adhere to some minimum.
-            // Wait, ExtractedMemoryStore.searchByEmbedding returns [ExtractedMemory] without scores.
-            // We should accept what we get, but we MUST remove the "most recent" fallback below.
-            
             if !results.isEmpty {
-                print("[MemorySearch] Embedding search found \(results.count) memories")
                 return results
             }
         } catch {
-            // If task was cancelled, propagate the error (don't fallback)
+            // Check cancellation
             let nsError = error as NSError
-            if nsError.domain == NSURLErrorDomain && nsError.code == -999 {
-                throw error
-            }
-            if let urlError = error as? URLError, urlError.code == .cancelled {
-                throw error
-            }
-            if error is CancellationError {
-                throw error
-            }
+            if nsError.domain == NSURLErrorDomain && nsError.code == -999 { throw error }
+            if let urlError = error as? URLError, urlError.code == .cancelled { throw error }
+            if error is CancellationError { throw error }
             
-            print("[MemorySearch] Embedding search failed, falling back to content search: \(error)")
+            print("[MemorySearch] Embedding search failed for '\(text)': \(error)")
         }
         
-        // Fallback: LIKE-based content search (no semantic vectors required)
-        let byContent = try await extractedStore.searchMemories(query: trimmed)
-        if !byContent.isEmpty {
-            print("[MemorySearch] Content search found \(byContent.count) memories")
-            return Array(byContent.prefix(topK))
-        }
+        // Fallback: Content search
+        let byContent = try await extractedStore.searchMemories(query: text)
+        return Array(byContent.prefix(topK))
+    }
+    
+    private func generateSearchQueries(from text: String) async -> [String] {
+        let systemPrompt = """
+        You are a search query generator. Given a user's input, extract 1-3 specific keywords or short phrases to search their memory database for relevant facts.
+        Return ONLY a JSON array of strings. Example: ["john email", "budget report"]
+        """
         
-        // Removed fallback that returns random recent memories
-        return []
+        do {
+            let queries = try await llmService.completeJSON(
+                prompt: text,
+                systemPrompt: systemPrompt,
+                responseType: [String].self
+            )
+            return queries
+        } catch {
+            print("[MemorySearch] Failed to generate queries: \(error)")
+            return []
+        }
     }
 }
 

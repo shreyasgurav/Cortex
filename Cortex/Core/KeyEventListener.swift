@@ -49,6 +49,9 @@ final class KeyEventListener: ObservableObject {
     /// Called when user types (for debugging)
     var onKeystroke: ((String) -> Void)?
     
+    /// Called when Control+M is pressed (Memory Insertion Shortcut)
+    var onInsertShortcutPressed: (() -> Void)?
+    
     // MARK: - Key Codes
     
     private let returnKeyCode: Int64 = Int64(kVK_Return)
@@ -204,6 +207,14 @@ final class KeyEventListener: ObservableObject {
             return
         }
         
+        // Check for Control+M (Shortcut for memory insertion)
+        // kVK_ANSI_M is 46
+        if keyCode == 46 && flags.contains(.maskControl) {
+            print("[KeyEventListener] Control+M detected - triggering memory insertion")
+            onInsertShortcutPressed?()
+            return
+        }
+
         // For Cmd+A, Cmd+V, Cmd+C, Cmd+X - handle specially
         if flags.contains(.maskCommand) {
             handleCommandShortcut(keyCode: keyCode, event: event)

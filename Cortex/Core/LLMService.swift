@@ -286,5 +286,34 @@ actor LLMService {
         
         return responseText
     }
+    
+    // MARK: - Environment Configuration
+    
+    func configureFromEnv(llmProvider: LLMProvider = .openai) {
+        let env = ProcessInfo.processInfo.environment
+        
+        var newConfig = self.config
+        newConfig.provider = llmProvider
+        
+        // API Key
+        if let key = env["OPENAI_API_KEY"], llmProvider == .openai {
+            newConfig.apiKey = key
+        } else if let key = env["ANTHROPIC_API_KEY"], llmProvider == .anthropic {
+            newConfig.apiKey = key
+        }
+        
+        // Model
+        if let model = env["CORTEX_LLM_MODEL"] {
+            newConfig.model = model
+        }
+        
+        // Base URL
+        if let baseURL = env["CORTEX_LLM_BASE_URL"] {
+            newConfig.baseURL = baseURL
+        }
+        
+        self.updateConfig(newConfig)
+        print("[LLMService] Configured from environment: \(llmProvider.rawValue)")
+    }
 }
 
