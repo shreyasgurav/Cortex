@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Menu Bar App Configuration -->
+    <key>LSUIElement</key>
+    <true/>
+    
+    <!-- App Name -->
+    <key>CFBundleName</key>
+    <string>MemoryTap</string>
+    <key>CFBundleDisplayName</key>
+    <string>MemoryTap</string>
+    
+    <!-- Privacy Descriptions for Permissions -->
+    <key>NSAccessibilityUsageDescription</key>
+    <string>MemoryTap needs Accessibility access to detect text in any application you use. This allows us to capture text you send from chat apps, editors, and browsers.</string>
+    
+    <!-- Application supports secure state restoration -->
+    <key>NSApplicationSupportsSecureRestorableState</key>
+    <true/>
+</dict>
+</plist>
+

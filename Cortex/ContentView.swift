@@ -1,21 +1,17 @@
 //
 //  ContentView.swift
-//  Cortex
+//  MemoryTap
 //
-//  Created by Shreyas Gurav on 04/01/26.
+//  This file is kept for compatibility but the main UI
+//  is now in MemoryWindowView.swift
 //
 
 import SwiftUI
 
+/// Legacy content view - redirects to MemoryWindowView
 struct ContentView: View {
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
+        MemoryWindowView(appState: AppState.shared)
     }
 }
 
