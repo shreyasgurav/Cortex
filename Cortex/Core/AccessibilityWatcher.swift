@@ -58,6 +58,12 @@ final class AccessibilityWatcher: ObservableObject {
     /// Called when text should be captured (focus lost with recent edits)
     var onTextShouldCapture: (@MainActor (String, CaptureSource, String, String, String) -> Void)?
     
+    /// Called when focus changes to a new element (for shadow buffer clearing)
+    var onFocusChanged: (() -> Void)?
+    
+    /// Called when app switches (for shadow buffer clearing)
+    var onAppSwitched: (() -> Void)?
+    
     // MARK: - Configuration
     
     /// How long after last edit to consider text as "recently edited"
@@ -85,6 +91,19 @@ final class AccessibilityWatcher: ObservableObject {
     
     init() {
         setupNotifications()
+    }
+    
+    // MARK: - Public Methods for CaptureCoordinator
+    
+    /// Get the text we've been tracking via Accessibility APIs
+    func getTrackedText() -> String {
+        return lastKnownText
+    }
+    
+    /// Try to read text directly from the current focused element
+    func tryReadCurrentElementText() -> String? {
+        guard let element = currentElement else { return nil }
+        return getElementText(element)
     }
     
     // MARK: - Start/Stop
@@ -173,6 +192,15 @@ final class AccessibilityWatcher: ObservableObject {
         // Update app state
         AppState.shared.currentAppName = currentAppName
         AppState.shared.currentAppBundleId = currentAppBundleId
+        
+        // Notify that app switched (for shadow buffer clearing)
+        onAppSwitched?()
+        
+        // Reset tracking state for new app
+        lastKnownText = ""
+        initialTextOnFocus = ""
+        userHasTyped = false
+        lastEditTime = nil
     }
     
     // MARK: - Placeholder Detection
@@ -325,6 +353,9 @@ final class AccessibilityWatcher: ObservableObject {
         initialTextOnFocus = ""
         userHasTyped = false
         lastEditTime = nil
+        
+        // Notify that focus changed (for shadow buffer clearing)
+        onFocusChanged?()
         
         // Check if new element is editable
         isEditableFieldFocused = isElementEditable(newElement)

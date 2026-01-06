@@ -3,6 +3,10 @@
 //  Cortex
 //
 //  Coordinates all capture logic and decides when to save memories
+//  Uses THREE layers (like Grammarly):
+//    1. Accessibility APIs (AXValue) - works for native apps
+//    2. Selection-based (AXSelectedText) - partial Electron support
+//    3. Shadow buffer (keystroke tracking) - robust Electron fallback
 //
 
 import Foundation
@@ -45,7 +49,7 @@ final class CaptureCoordinator: ObservableObject {
     // MARK: - Setup
     
     private func setupCallbacks() {
-        // When AccessibilityWatcher detects text should be captured
+        // When AccessibilityWatcher detects text should be captured (focus lost, app switch)
         accessibilityWatcher.onTextShouldCapture = { [weak self] text, source, appName, bundleId, windowTitle in
             Task { @MainActor in
                 await self?.captureText(
@@ -58,10 +62,177 @@ final class CaptureCoordinator: ObservableObject {
             }
         }
         
-        // When KeyEventListener detects Enter key
-        keyEventListener.onEnterKeyPressed = { [weak self] in
-            self?.accessibilityWatcher.captureCurrentTextOnEnter()
+        // When AccessibilityWatcher detects focus change - clear shadow buffer
+        accessibilityWatcher.onFocusChanged = { [weak self] in
+            self?.keyEventListener.clearBuffer()
         }
+        
+        // When AccessibilityWatcher detects app switch - clear shadow buffer
+        accessibilityWatcher.onAppSwitched = { [weak self] in
+            self?.keyEventListener.clearBuffer()
+        }
+        
+        // When KeyEventListener detects Enter key - THIS IS THE MAIN CAPTURE POINT
+        keyEventListener.onEnterKeyPressed = { [weak self] shadowBuffer in
+            self?.handleEnterKeyWithShadowBuffer(shadowBuffer)
+        }
+    }
+    
+    // MARK: - Enter Key Handling (The Smart Part)
+    
+    /// Handle Enter key press - compare multiple sources and pick the best text
+    private func handleEnterKeyWithShadowBuffer(_ shadowBuffer: String) {
+        let appName = accessibilityWatcher.currentAppName
+        let bundleId = accessibilityWatcher.currentAppBundleId
+        let windowTitle = accessibilityWatcher.windowTitle
+        
+        print("[CaptureCoordinator] ========== ENTER KEY PRESSED ==========")
+        print("[CaptureCoordinator] App: \(appName) (\(bundleId))")
+        print("[CaptureCoordinator] Shadow buffer: '\(shadowBuffer.prefix(50))...' (\(shadowBuffer.count) chars)")
+        
+        // Layer 1: Try Accessibility API (works for native apps)
+        let accessibilityText = accessibilityWatcher.getTrackedText()
+        print("[CaptureCoordinator] Accessibility text: '\(accessibilityText.prefix(50))...' (\(accessibilityText.count) chars)")
+        
+        // Layer 2: Try to read directly from focused element
+        let directText = accessibilityWatcher.tryReadCurrentElementText() ?? ""
+        print("[CaptureCoordinator] Direct read text: '\(directText.prefix(50))...' (\(directText.count) chars)")
+        
+        // Layer 3: Shadow buffer (keystroke tracking)
+        // Already have it as parameter
+        
+        // DECISION: Pick the best text source
+        // Priority: Accessibility > Direct > Shadow Buffer (but validate each)
+        let textToCapture = chooseBestText(
+            accessibility: accessibilityText,
+            direct: directText,
+            shadow: shadowBuffer,
+            appName: appName
+        )
+        
+        guard let finalText = textToCapture, !finalText.isEmpty else {
+            print("[CaptureCoordinator] ✗ No valid text found from any source")
+            return
+        }
+        
+        print("[CaptureCoordinator] ✓ Capturing: '\(finalText.prefix(50))...'")
+        
+        // Capture it
+        Task { @MainActor in
+            await captureText(
+                text: finalText,
+                source: .enterKey,
+                appName: appName,
+                appBundleId: bundleId,
+                windowTitle: windowTitle
+            )
+        }
+    }
+    
+    /// Choose the best text from multiple sources
+    private func chooseBestText(
+        accessibility: String,
+        direct: String,
+        shadow: String,
+        appName: String
+    ) -> String? {
+        let trimmedAccessibility = accessibility.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedDirect = direct.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedShadow = shadow.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Filter out placeholder/junk text
+        let validAccessibility = isValidUserText(trimmedAccessibility) ? trimmedAccessibility : ""
+        let validDirect = isValidUserText(trimmedDirect) ? trimmedDirect : ""
+        let validShadow = isValidUserText(trimmedShadow) ? trimmedShadow : ""
+        
+        // For Electron apps (Cursor, VS Code, Slack), prefer shadow buffer
+        let isElectronApp = isLikelyElectronApp(appName)
+        
+        if isElectronApp {
+            print("[CaptureCoordinator] Electron app detected - prioritizing shadow buffer")
+            // For Electron: Shadow > Accessibility > Direct
+            if !validShadow.isEmpty {
+                return validShadow
+            }
+            if !validAccessibility.isEmpty {
+                return validAccessibility
+            }
+            if !validDirect.isEmpty {
+                return validDirect
+            }
+        } else {
+            // For native apps: Accessibility > Shadow > Direct
+            if !validAccessibility.isEmpty {
+                return validAccessibility
+            }
+            if !validShadow.isEmpty {
+                return validShadow
+            }
+            if !validDirect.isEmpty {
+                return validDirect
+            }
+        }
+        
+        return nil
+    }
+    
+    /// Check if text looks like actual user content
+    private func isValidUserText(_ text: String) -> Bool {
+        guard !text.isEmpty else { return false }
+        
+        // Too short might be accidental
+        // But allow single chars like "y", "k", "!" for quick replies
+        
+        let lowercased = text.lowercased()
+        
+        // Filter out common placeholders
+        let placeholders = [
+            "ask anything", "type a message", "message", "search",
+            "write a message", "type here", "enter text",
+            "write something", "what's on your mind", "send a message",
+            "ask me anything", "ask a question"
+        ]
+        
+        for placeholder in placeholders {
+            if lowercased == placeholder || lowercased.hasPrefix(placeholder) {
+                return false
+            }
+        }
+        
+        // Filter out app names and window titles
+        let appNames = [
+            "google chrome", "safari", "firefox", "cursor", "xcode", "slack",
+            "discord", "notion", "finder", "terminal", "messages", "mail",
+            "spotify", "zoom", "teams", "cortex", "code", "visual studio"
+        ]
+        
+        if appNames.contains(lowercased) {
+            return false
+        }
+        
+        // Filter out URLs without context
+        if text.count < 50 && !text.contains(" ") {
+            let urlPatterns = [".com", ".org", ".io", ".net", ".dev", "http://", "https://"]
+            for pattern in urlPatterns {
+                if text.contains(pattern) {
+                    return false
+                }
+            }
+        }
+        
+        return true
+    }
+    
+    /// Check if app is likely an Electron app (where Accessibility is flaky)
+    private func isLikelyElectronApp(_ appName: String) -> Bool {
+        let electronApps = [
+            "cursor", "visual studio code", "code", "slack", "discord",
+            "notion", "figma", "postman", "insomnia", "atom", "teams",
+            "whatsapp", "telegram desktop", "signal", "element", "obsidian"
+        ]
+        
+        let lowercased = appName.lowercased()
+        return electronApps.contains { lowercased.contains($0) }
     }
     
     // MARK: - Start/Stop
@@ -81,7 +252,7 @@ final class CaptureCoordinator: ObservableObject {
         }
         
         isCapturing = true
-        print("[CaptureCoordinator] Started capture coordinator")
+        print("[CaptureCoordinator] Started capture coordinator (with shadow buffer support)")
     }
     
     func stop() {
@@ -123,9 +294,6 @@ final class CaptureCoordinator: ObservableObject {
             return
         }
         
-        // Note: We allow single-character messages like "k", "y", etc.
-        // Filtering is done in AccessibilityWatcher to avoid capturing junk
-        
         // Create memory
         let memory = Memory(
             id: UUID().uuidString,
@@ -149,7 +317,7 @@ final class CaptureCoordinator: ObservableObject {
                 AppState.shared.addMemory(memory)
             }
             
-            print("[CaptureCoordinator] Captured memory from \(appName) via \(source.rawValue)")
+            print("[CaptureCoordinator] ✓✓✓ Saved memory from \(appName) via \(source.rawValue)")
             
         } catch {
             print("[CaptureCoordinator] Failed to save memory: \(error)")
@@ -158,7 +326,6 @@ final class CaptureCoordinator: ObservableObject {
     
     // MARK: - State Updates
     
-    /// Called when capture settings change
     func updateCaptureState() {
         if AppState.shared.shouldCapture && !isCapturing {
             start()
@@ -176,4 +343,3 @@ final class CaptureCoordinator: ObservableObject {
         }
     }
 }
-
