@@ -1,6 +1,6 @@
 //
 //  OnboardingView.swift
-//  MemoryTap
+//  Cortex
 //
 //  Onboarding and permissions setup screen
 //
@@ -70,7 +70,7 @@ struct OnboardingView: View {
                 )
             
             VStack(alignment: .leading, spacing: 2) {
-                Text("MemoryTap")
+                Text("Cortex")
                     .font(.title2)
                     .fontWeight(.bold)
                 
@@ -88,11 +88,11 @@ struct OnboardingView: View {
     
     private var welcomeSection: some View {
         VStack(spacing: 16) {
-            Text("Welcome to MemoryTap")
+            Text("Welcome to Cortex")
                 .font(.title)
                 .fontWeight(.bold)
             
-            Text("MemoryTap captures text you send from any application on your Mac. Messages, AI prompts, emails, notes—everything is saved locally as your personal memory.")
+            Text("Cortex captures text you send from any application on your Mac. Messages, AI prompts, emails, notes—everything is saved locally as your personal memory.")
                 .font(.body)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -108,7 +108,7 @@ struct OnboardingView: View {
             // Accessibility Permission
             PermissionCard(
                 title: "Accessibility",
-                description: "Required to detect and read text from any application. This is how MemoryTap can work across all your apps.",
+                description: "Required to detect and read text from any application. This is how Cortex can work across all your apps.",
                 icon: "hand.raised.fill",
                 iconColor: .purple,
                 isGranted: permissionsManager.accessibilityGranted,

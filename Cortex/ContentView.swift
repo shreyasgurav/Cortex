@@ -1,6 +1,6 @@
 //
 //  ContentView.swift
-//  MemoryTap
+//  Cortex
 //
 //  This file is kept for compatibility but the main UI
 //  is now in MemoryWindowView.swift

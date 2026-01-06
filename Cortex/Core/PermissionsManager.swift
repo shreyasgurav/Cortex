@@ -1,6 +1,6 @@
 //
 //  PermissionsManager.swift
-//  MemoryTap
+//  Cortex
 //
 //  Manages Accessibility and Input Monitoring permissions
 //
@@ -10,7 +10,7 @@ import AppKit
 import ApplicationServices
 import Combine
 
-/// Manages system permissions required for MemoryTap to function
+/// Manages system permissions required for Cortex to function
 /// - Accessibility: Required to read text from any application
 /// - Input Monitoring: Optional, enables Enter key detection for better capture timing
 @MainActor
@@ -177,11 +177,11 @@ extension PermissionsManager {
         var description: String {
             switch self {
             case .accessibilityRequired:
-                return "MemoryTap needs Accessibility access to detect and read text from any application. This is required for the app to function."
+                return "Cortex needs Accessibility access to detect and read text from any application. This is required for the app to function."
             case .inputMonitoringOptional:
-                return "Input Monitoring allows MemoryTap to detect when you press Enter to send messages. This improves capture accuracy but is optional."
+                return "Input Monitoring allows Cortex to detect when you press Enter to send messages. This improves capture accuracy but is optional."
             case .allGranted:
-                return "MemoryTap has all the permissions it needs to capture your memories."
+                return "Cortex has all the permissions it needs to capture your memories."
             }
         }
     }

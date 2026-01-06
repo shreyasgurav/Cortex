@@ -1,6 +1,6 @@
 //
 //  MemoryStore.swift
-//  MemoryTap
+//  Cortex
 //
 //  SQLite-based local storage for captured memories
 //
@@ -17,7 +17,7 @@ final class MemoryStore: @unchecked Sendable {
     
     private var db: OpaquePointer?
     private let dbPath: String
-    private let queue = DispatchQueue(label: "com.memorytap.store", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "com.cortex.store", qos: .userInitiated)
     
     /// Cache of recent text hashes for deduplication
     /// Maps (hash, appBundleId) -> timestamp
@@ -28,7 +28,7 @@ final class MemoryStore: @unchecked Sendable {
     init() throws {
         // Store database in Application Support directory
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appFolder = appSupport.appendingPathComponent("MemoryTap", isDirectory: true)
+        let appFolder = appSupport.appendingPathComponent("Cortex", isDirectory: true)
         
         // Create directory if needed
         try FileManager.default.createDirectory(at: appFolder, withIntermediateDirectories: true)

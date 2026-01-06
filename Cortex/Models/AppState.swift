@@ -1,6 +1,6 @@
 //
 //  AppState.swift
-//  MemoryTap
+//  Cortex
 //
 //  Global application state management
 //

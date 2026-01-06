@@ -1,10 +1,10 @@
-# MemoryTap
+# Cortex
 
 A macOS menu bar application that captures and stores text you send from any application. Built with Swift and SwiftUI.
 
 ## Overview
 
-MemoryTap runs in your menu bar and uses macOS Accessibility APIs to detect text you type and send from any application—chat messages, AI prompts, emails, notes, code comments, and more. All captured text is stored locally in a SQLite database on your Mac.
+Cortex runs in your menu bar and uses macOS Accessibility APIs to detect text you type and send from any application—chat messages, AI prompts, emails, notes, code comments, and more. All captured text is stored locally in a SQLite database on your Mac.
 
 **Version 1.0** focuses on reliable text capture. No AI, no cloud sync—just solid, local memory storage.
 
@@ -33,17 +33,17 @@ MemoryTap runs in your menu bar and uses macOS Accessibility APIs to detect text
 
 ### First Launch
 
-When you first launch MemoryTap, you'll need to grant permissions:
+When you first launch Cortex, you'll need to grant permissions:
 
 1. **Accessibility Permission** (Required)
-   - MemoryTap needs this to read text from any application
+   - Cortex needs this to read text from any application
    - Go to: System Settings → Privacy & Security → Accessibility
-   - Find and enable MemoryTap
+   - Find and enable Cortex
 
 2. **Input Monitoring Permission** (Optional but Recommended)
    - Enables detection of Enter key presses for better capture timing
    - Go to: System Settings → Privacy & Security → Input Monitoring
-   - Find and enable MemoryTap
+   - Find and enable Cortex
 
 ## Usage
 
@@ -65,7 +65,7 @@ Click the brain icon in your menu bar to:
 
 ### How Capture Works
 
-MemoryTap detects "sent" text through several heuristics:
+Cortex detects "sent" text through several heuristics:
 
 1. **Enter Key**: When you press Enter or Cmd+Enter (common send shortcuts)
 2. **Focus Lost**: When you finish editing and click elsewhere
@@ -117,7 +117,7 @@ Cortex/
 
 Memories are stored in SQLite at:
 ```
-~/Library/Application Support/MemoryTap/memories.db
+~/Library/Application Support/Cortex/memories.db
 ```
 
 Schema:

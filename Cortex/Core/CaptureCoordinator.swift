@@ -1,6 +1,6 @@
 //
 //  CaptureCoordinator.swift
-//  MemoryTap
+//  Cortex
 //
 //  Coordinates all capture logic and decides when to save memories
 //

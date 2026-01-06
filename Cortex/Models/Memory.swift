@@ -1,6 +1,6 @@
 //
 //  Memory.swift
-//  MemoryTap
+//  Cortex
 //
 //  Core data model for captured memories
 //

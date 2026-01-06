@@ -8,13 +8,13 @@
     
     <!-- App Name -->
     <key>CFBundleName</key>
-    <string>MemoryTap</string>
+    <string>Cortex</string>
     <key>CFBundleDisplayName</key>
-    <string>MemoryTap</string>
+    <string>Cortex</string>
     
     <!-- Privacy Descriptions for Permissions -->
     <key>NSAccessibilityUsageDescription</key>
-    <string>MemoryTap needs Accessibility access to detect text in any application you use. This allows us to capture text you send from chat apps, editors, and browsers.</string>
+    <string>Cortex needs Accessibility access to detect text in any application you use. This allows us to capture text you send from chat apps, editors, and browsers.</string>
     
     <!-- Application supports secure state restoration -->
     <key>NSApplicationSupportsSecureRestorableState</key>

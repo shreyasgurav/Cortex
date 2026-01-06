@@ -1,6 +1,6 @@
 //
 //  AccessibilityWatcher.swift
-//  MemoryTap
+//  Cortex
 //
 //  Watches focused UI elements using macOS Accessibility APIs
 //
@@ -212,7 +212,7 @@ final class AccessibilityWatcher: ObservableObject {
         let appNames = [
             "google chrome", "safari", "firefox", "cursor", "xcode", "slack",
             "discord", "notion", "finder", "terminal", "messages", "mail",
-            "spotify", "zoom", "teams", "memorytap", "code", "visual studio"
+            "spotify", "zoom", "teams", "cortex", "code", "visual studio"
         ]
         
         // Exact match with app name

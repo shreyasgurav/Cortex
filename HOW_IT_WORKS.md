@@ -1,11 +1,11 @@
-# How MemoryTap Works - Step by Step
+# How Cortex Works - Step by Step
 
 ## 🎯 What Happens When You Type and Press Enter
 
 Here's exactly what happens when you type a message and press Enter:
 
 ### 1. **You Type in Any App** (Slack, Messages, Browser, etc.)
-   - MemoryTap is **continuously watching** the focused text field
+   - Cortex is **continuously watching** the focused text field
    - Every 100ms, it checks: "What text field is focused? What's the text in it?"
    - It tracks changes to the text as you type
 
@@ -24,15 +24,15 @@ Here's exactly what happens when you type a message and press Enter:
    - The captured text is:
      - Trimmed (whitespace removed)
      - Hashed (SHA256) for deduplication
-     - Saved to SQLite database at: `~/Library/Application Support/MemoryTap/memories.db`
-   - The memory appears in your MemoryTap window
+     - Saved to SQLite database at: `~/Library/Application Support/Cortex/memories.db`
+   - The memory appears in your Cortex window
 
 ## 🔍 How to Verify It's Working
 
 ### Check the Console Logs
-Open **Console.app** and filter for "MemoryTap" or "CaptureCoordinator". You should see:
+Open **Console.app** and filter for "Cortex" or "CaptureCoordinator". You should see:
 ```
-[MemoryTap] Application launched
+[Cortex] Application launched
 [AccessibilityWatcher] Started watching
 [KeyEventListener] Started listening for key events
 [CaptureCoordinator] Started capture coordinator
@@ -45,7 +45,7 @@ Open **Console.app** and filter for "MemoryTap" or "CaptureCoordinator". You sho
 1. Open **Messages** or **Slack**
 2. Type a message: "Test message 123"
 3. Press **Enter** (or Cmd+Enter)
-4. Click the **MemoryTap icon** in your menu bar
+4. Click the **Cortex icon** in your menu bar
 5. Click **"Open Memory"**
 6. You should see your message in the list!
 
@@ -60,7 +60,7 @@ Open **Console.app** and filter for "MemoryTap" or "CaptureCoordinator". You sho
 ### Not Capturing?
 1. **Check permissions:**
    - System Settings → Privacy & Security → Accessibility
-   - Make sure MemoryTap is enabled ✅
+   - Make sure Cortex is enabled ✅
 
 2. **Check if capture is enabled:**
    - Menu bar → Make sure "Capture Enabled" is ON
@@ -77,7 +77,7 @@ Open **Console.app** and filter for "MemoryTap" or "CaptureCoordinator". You sho
 ### Enter Key Not Detected?
 - Grant **Input Monitoring** permission:
   - System Settings → Privacy & Security → Input Monitoring
-  - Enable MemoryTap ✅
+  - Enable Cortex ✅
   - The app will automatically restart capture
 
 ## 📊 What Gets Captured

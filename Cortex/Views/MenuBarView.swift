@@ -1,6 +1,6 @@
 //
 //  MenuBarView.swift
-//  MemoryTap
+//  Cortex
 //
 //  Menu bar dropdown UI
 //
@@ -57,7 +57,7 @@ struct MenuBarView: View {
                 )
             
             VStack(alignment: .leading, spacing: 2) {
-                Text("MemoryTap")
+                Text("Cortex")
                     .font(.headline)
                     .fontWeight(.semibold)
                 
@@ -224,7 +224,7 @@ struct MenuBarView: View {
             
             // Quit
             MenuButton(
-                title: "Quit MemoryTap",
+                title: "Quit Cortex",
                 icon: "power",
                 action: onQuit
             )

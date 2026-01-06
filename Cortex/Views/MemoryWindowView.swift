@@ -1,6 +1,6 @@
 //
 //  MemoryWindowView.swift
-//  MemoryTap
+//  Cortex
 //
 //  Main window for viewing and managing memories
 //
@@ -31,7 +31,7 @@ struct MemoryWindowView: View {
             }
         }
         .frame(minWidth: 700, minHeight: 500)
-        .navigationTitle("MemoryTap")
+        .navigationTitle("Cortex")
     }
     
     // MARK: - Memory List

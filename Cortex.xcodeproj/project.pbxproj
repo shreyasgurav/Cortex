@@ -24,7 +24,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		3D1C62172F0A9AD300FC0CBB /* Cortex.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = Cortex.app; path = MemoryTap.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3D1C62172F0A9AD300FC0CBB /* Cortex.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = Cortex.app; path = Cortex.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3D1C62242F0A9AD400FC0CBB /* CortexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CortexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3D1C622E2F0A9AD400FC0CBB /* CortexUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CortexUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -412,8 +412,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.shreyasgurav.MemoryTap;
-				PRODUCT_NAME = MemoryTap;
+				PRODUCT_BUNDLE_IDENTIFIER = com.shreyasgurav.Cortex;
+				PRODUCT_NAME = Cortex;
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -447,8 +447,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.shreyasgurav.MemoryTap;
-				PRODUCT_NAME = MemoryTap;
+				PRODUCT_BUNDLE_IDENTIFIER = com.shreyasgurav.Cortex;
+				PRODUCT_NAME = Cortex;
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;

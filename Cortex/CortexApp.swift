@@ -1,6 +1,6 @@
 //
-//  CortexApp.swift (MemoryTap)
-//  MemoryTap
+//  CortexApp.swift
+//  Cortex
 //
 //  A macOS menu bar app that captures and stores text
 //  you send from any application.
@@ -10,13 +10,13 @@ import SwiftUI
 import Combine
 
 @main
-struct MemoryTapApp: App {
+struct CortexApp: App {
     // Use AppDelegate for menu bar management
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
         // Memory Window
-        Window("MemoryTap", id: "memory-window") {
+        Window("Cortex", id: "memory-window") {
             MemoryWindowView(appState: AppState.shared)
         }
         .defaultSize(width: 900, height: 600)
@@ -82,13 +82,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Hide dock icon (we're a menu bar app)
         NSApp.setActivationPolicy(.accessory)
         
-        print("[MemoryTap] Application launched")
+        print("[Cortex] Application launched")
     }
     
     func applicationWillTerminate(_ notification: Notification) {
         captureCoordinator?.stop()
         permissionsManager?.stopMonitoring()
-        print("[MemoryTap] Application terminating")
+        print("[Cortex] Application terminating")
     }
     
     // MARK: - Setup
@@ -99,7 +99,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             memoryStore = try MemoryStore()
             AppState.shared.setup(memoryStore: memoryStore!)
         } catch {
-            print("[MemoryTap] Failed to initialize memory store: \(error)")
+            print("[Cortex] Failed to initialize memory store: \(error)")
             // Continue without storage - app will still run but won't save
         }
         
@@ -132,7 +132,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .dropFirst() // Skip initial value
             .sink { [weak self] granted in
                 if granted {
-                    print("[MemoryTap] Accessibility permission granted, starting capture...")
+                    print("[Cortex] Accessibility permission granted, starting capture...")
                     self?.startCaptureIfPossible()
                 }
             }
@@ -172,7 +172,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         if let button = statusItem?.button {
             // Use SF Symbol for menu bar icon
-            button.image = NSImage(systemSymbolName: "brain.head.profile", accessibilityDescription: "MemoryTap")
+            button.image = NSImage(systemSymbolName: "brain.head.profile", accessibilityDescription: "Cortex")
             button.image?.size = NSSize(width: 18, height: 18)
             button.action = #selector(togglePopover)
             button.target = self
@@ -301,7 +301,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     private func startCaptureIfPossible() {
         guard permissionsManager?.accessibilityGranted == true else {
-            print("[MemoryTap] Cannot start capture - accessibility not granted")
+            print("[Cortex] Cannot start capture - accessibility not granted")
             return
         }
         

@@ -1,6 +1,6 @@
 //
 //  KeyEventListener.swift
-//  MemoryTap
+//  Cortex
 //
 //  Global key event listener for detecting Enter/Cmd+Enter
 //
