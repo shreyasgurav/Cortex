@@ -55,7 +55,9 @@ final class ExtractedMemoryStore: @unchecked Sendable {
             source_app TEXT NOT NULL,
             is_active INTEGER NOT NULL DEFAULT 1,
             expires_at INTEGER,
-            related_memory_ids TEXT NOT NULL DEFAULT '[]'
+            related_memory_ids TEXT NOT NULL DEFAULT '[]',
+            embedding TEXT,
+            embedding_model TEXT
         );
         
         CREATE INDEX IF NOT EXISTS idx_extracted_created_at ON extracted_memories(created_at DESC);
@@ -81,7 +83,7 @@ final class ExtractedMemoryStore: @unchecked Sendable {
     // MARK: - Save Methods
     
     /// Save an extracted memory
-    func saveMemory(_ memory: ExtractedMemory) async throws {
+    func saveMemory(_ memory: ExtractedMemory, embedding: [Double]? = nil, embeddingModel: String? = nil) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async { [weak self] in
                 guard let self = self, let db = self.db else {
@@ -91,8 +93,8 @@ final class ExtractedMemoryStore: @unchecked Sendable {
                 
                 let sql = """
                 INSERT OR REPLACE INTO extracted_memories 
-                (id, created_at, content, type, confidence, tags, source_memory_id, source_app, is_active, expires_at, related_memory_ids)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, created_at, content, type, confidence, tags, source_memory_id, source_app, is_active, expires_at, related_memory_ids, embedding, embedding_model)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
                 
                 var statement: OpaquePointer?
@@ -106,6 +108,7 @@ final class ExtractedMemoryStore: @unchecked Sendable {
                 
                 let tagsJSON = (try? JSONEncoder().encode(memory.tags)) ?? Data()
                 let relatedJSON = (try? JSONEncoder().encode(memory.relatedMemoryIds)) ?? Data()
+                let embeddingJSON = embedding.flatMap { try? JSONEncoder().encode($0) }
                 
                 sqlite3_bind_text(statement, 1, (memory.id as NSString).utf8String, -1, nil)
                 sqlite3_bind_int64(statement, 2, Int64(memory.createdAt.timeIntervalSince1970))
@@ -125,6 +128,18 @@ final class ExtractedMemoryStore: @unchecked Sendable {
                 
                 sqlite3_bind_text(statement, 11, (String(data: relatedJSON, encoding: .utf8)! as NSString).utf8String, -1, nil)
                 
+                 if let embeddingJSON = embeddingJSON, let embString = String(data: embeddingJSON, encoding: .utf8) {
+                    sqlite3_bind_text(statement, 12, (embString as NSString).utf8String, -1, nil)
+                } else {
+                    sqlite3_bind_null(statement, 12)
+                }
+                
+                if let model = embeddingModel {
+                    sqlite3_bind_text(statement, 13, (model as NSString).utf8String, -1, nil)
+                } else {
+                    sqlite3_bind_null(statement, 13)
+                }
+                
                 guard sqlite3_step(statement) == SQLITE_DONE else {
                     continuation.resume(throwing: ExtractedMemoryStoreError.insertFailed)
                     return
@@ -137,9 +152,9 @@ final class ExtractedMemoryStore: @unchecked Sendable {
     }
     
     /// Save multiple extracted memories
-    func saveMemories(_ memories: [ExtractedMemory]) async throws {
-        for memory in memories {
-            try await saveMemory(memory)
+    func saveMemories(_ memories: [(memory: ExtractedMemory, embedding: [Double]?, embeddingModel: String?)]) async throws {
+        for entry in memories {
+            try await saveMemory(entry.memory, embedding: entry.embedding, embeddingModel: entry.embeddingModel)
         }
     }
     
@@ -270,7 +285,7 @@ final class ExtractedMemoryStore: @unchecked Sendable {
         }
     }
     
-    /// Search memories by content
+    /// Search memories by content (case-insensitive LIKE)
     func searchMemories(query: String) async throws -> [ExtractedMemory] {
         try await withCheckedThrowingContinuation { continuation in
             queue.async { [weak self] in
@@ -280,9 +295,9 @@ final class ExtractedMemoryStore: @unchecked Sendable {
                 }
                 
                 let sql = """
-                SELECT id, created_at, content, type, confidence, tags, source_memory_id, source_app, is_active, expires_at, related_memory_ids
+                SELECT id, created_at, content, type, confidence, tags, source_memory_id, source_app, is_active, expires_at, related_memory_ids, embedding, embedding_model
                 FROM extracted_memories
-                WHERE content LIKE ? AND is_active = 1
+                WHERE LOWER(content) LIKE LOWER(?) AND is_active = 1
                 ORDER BY created_at DESC
                 """
                 
@@ -309,6 +324,35 @@ final class ExtractedMemoryStore: @unchecked Sendable {
                 continuation.resume(returning: memories)
             }
         }
+    }
+    
+    // MARK: - Semantic Search (Cosine on stored embeddings)
+    
+    /// Compute cosine similarity between two vectors
+    private func cosine(_ a: [Double], _ b: [Double]) -> Double {
+        guard a.count == b.count, !a.isEmpty else { return 0 }
+        var dot: Double = 0
+        var na: Double = 0
+        var nb: Double = 0
+        for i in 0..<a.count {
+            dot += a[i] * b[i]
+            na += a[i] * a[i]
+            nb += b[i] * b[i]
+        }
+        let denom = (na.squareRoot() * nb.squareRoot())
+        return denom == 0 ? 0 : dot / denom
+    }
+    
+    /// Semantic search using precomputed embeddings (in-memory scoring)
+    func searchByEmbedding(queryEmbedding: [Double], topK: Int = 10) async throws -> [ExtractedMemory] {
+        let all = try await fetchAllMemories()
+        let scored: [(ExtractedMemory, Double)] = all.compactMap { mem in
+            guard let emb = mem.embedding else { return nil }
+            let score = cosine(queryEmbedding, emb)
+            return (mem, score)
+        }
+        let sorted = scored.sorted { $0.1 > $1.1 }.prefix(topK).map { $0.0 }
+        return sorted
     }
     
     /// Check if a raw memory has been processed
@@ -443,6 +487,19 @@ final class ExtractedMemoryStore: @unchecked Sendable {
         let relatedJSON = String(cString: relatedCStr)
         let relatedMemoryIds = (try? JSONDecoder().decode([String].self, from: relatedJSON.data(using: .utf8)!)) ?? []
         
+        var embedding: [Double]? = nil
+        if sqlite3_column_type(statement, 11) != SQLITE_NULL,
+           let embCStr = sqlite3_column_text(statement, 11) {
+            let embJSON = String(cString: embCStr)
+            embedding = try? JSONDecoder().decode([Double].self, from: Data(embJSON.utf8))
+        }
+        
+        var embeddingModel: String? = nil
+        if sqlite3_column_type(statement, 12) != SQLITE_NULL,
+           let modelCStr = sqlite3_column_text(statement, 12) {
+            embeddingModel = String(cString: modelCStr)
+        }
+        
         return ExtractedMemory(
             id: id,
             createdAt: createdAt,
@@ -454,7 +511,9 @@ final class ExtractedMemoryStore: @unchecked Sendable {
             sourceApp: sourceApp,
             isActive: isActive,
             expiresAt: expiresAt,
-            relatedMemoryIds: relatedMemoryIds
+            relatedMemoryIds: relatedMemoryIds,
+            embedding: embedding,
+            embeddingModel: embeddingModel
         )
     }
 }

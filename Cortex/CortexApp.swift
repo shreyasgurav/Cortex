@@ -63,6 +63,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var keyEventListener: KeyEventListener?
     private var captureCoordinator: CaptureCoordinator?
     private var memoryStore: MemoryStore?
+    private var memoryProcessor: MemoryProcessor?
+    private var extractedMemoryStore: ExtractedMemoryStore?
+    private var memoryOverlayManager: MemoryOverlayManager?
     
     // MARK: - App Lifecycle
     
@@ -108,6 +111,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         accessibilityWatcher = AccessibilityWatcher()
         keyEventListener = KeyEventListener()
         
+        // Initialize extracted memory store (AI-processed)
+        do {
+            extractedMemoryStore = try ExtractedMemoryStore()
+        } catch {
+            print("[Cortex] Failed to initialize extracted memory store: \(error)")
+        }
+        
+        // Initialize processor with extracted store
+        memoryProcessor = MemoryProcessor(extractedMemoryStore: extractedMemoryStore)
+        
+        // Configure MemoryProcessor from environment (if keys provided)
+        if let processor = memoryProcessor {
+            let enabled = processor.configureFromEnvironment()
+            print("[Cortex] MemoryProcessor configured from environment. Enabled: \(enabled)")
+        }
+        
         // Initialize coordinator
         if let store = memoryStore,
            let permissions = permissionsManager,
@@ -117,8 +136,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 accessibilityWatcher: watcher,
                 keyEventListener: keyListener,
                 memoryStore: store,
-                permissionsManager: permissions
+                permissionsManager: permissions,
+                memoryProcessor: memoryProcessor
             )
+            
+            // Initialize overlay manager for memory suggestions
+            if let extractedStore = extractedMemoryStore {
+                let contextDetector = ContextDetector(accessibilityWatcher: watcher)
+                // Reuse MemoryProcessor's embedding service indirectly via new one configured from env
+                let embedService = EmbeddingService()
+                Task {
+                    await embedService.configureFromEnv(llmProvider: .openai)
+                }
+                let searchService = MemorySearchService(embeddingService: embedService, extractedStore: extractedStore)
+                let insertService = MemoryInsertService()
+                memoryOverlayManager = MemoryOverlayManager(
+                    contextDetector: contextDetector,
+                    searchService: searchService,
+                    insertService: insertService
+                )
+            }
         }
         
         // Observe state changes
@@ -157,11 +194,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] enabled in
                 if enabled {
                     self?.captureCoordinator?.stop()
+                    self?.memoryOverlayManager?.hideOverlay()
                 } else {
                     self?.startCaptureIfPossible()
                 }
             }
             .store(in: &cancellables)
+        
+        // Periodically update overlay position based on current context
+        Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.memoryOverlayManager?.updateOverlayVisibility()
+            }
+        }
     }
     
     private var cancellables = Set<AnyCancellable>()

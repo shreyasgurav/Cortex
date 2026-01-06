@@ -26,6 +26,8 @@ final class MemoryProcessor: ObservableObject {
     
     private var llmService: LLMService
     private var config: LLMConfig
+    private var extractedMemoryStore: ExtractedMemoryStore?
+    private var embeddingService: EmbeddingService
     
     // MARK: - Queue for processing
     
@@ -34,19 +36,28 @@ final class MemoryProcessor: ObservableObject {
     
     // MARK: - Initialization
     
-    init(config: LLMConfig = .default) {
+    init(extractedMemoryStore: ExtractedMemoryStore? = nil, config: LLMConfig = .default) {
         self.config = config
         self.llmService = LLMService(config: config)
+        self.extractedMemoryStore = extractedMemoryStore
+        self.embeddingService = EmbeddingService()
+    }
+    
+    func setExtractedMemoryStore(_ store: ExtractedMemoryStore?) {
+        self.extractedMemoryStore = store
     }
     
     // MARK: - Configuration
     
-    func configure(provider: LLMProvider, apiKey: String, model: String? = nil) {
+    func configure(provider: LLMProvider, apiKey: String?, model: String? = nil, baseURL: String? = nil) {
         var newConfig = config
         newConfig.provider = provider
         newConfig.apiKey = apiKey
         if let model = model {
             newConfig.model = model
+        }
+        if let baseURL = baseURL {
+            newConfig.baseURL = baseURL
         }
         self.config = newConfig
         
@@ -54,16 +65,75 @@ final class MemoryProcessor: ObservableObject {
             await llmService.updateConfig(newConfig)
         }
         
-        isEnabled = !apiKey.isEmpty
-        print("[MemoryProcessor] Configured with \(provider.displayName)")
+        // Ollama doesn't require a key; others do
+        switch provider {
+        case .ollama:
+            isEnabled = true
+        default:
+            isEnabled = !(apiKey ?? "").isEmpty
+        }
+        
+        print("[MemoryProcessor] Configured with \(provider.displayName) (enabled: \(isEnabled))")
+    }
+    
+    /// Configure from environment variables (.env loaded into process env)
+    /// Returns true if configuration succeeded (has key or using Ollama)
+    @discardableResult
+    func configureFromEnvironment() -> Bool {
+        let env = ProcessInfo.processInfo.environment
+        
+        // Provider
+        let providerString = env["CORTEX_LLM_PROVIDER"]?.lowercased() ?? "openai"
+        let provider = LLMProvider(rawValue: providerString) ?? .openai
+        
+        // Model / base URL
+        let model = env["CORTEX_LLM_MODEL"]
+        let baseURL = env["CORTEX_LLM_BASE_URL"] ?? env["OLLAMA_BASE_URL"]
+        
+        // API key selection
+        var apiKey: String?
+        switch provider {
+        case .openai:
+            apiKey = env["OPENAI_API_KEY"]
+        case .anthropic:
+            apiKey = env["ANTHROPIC_API_KEY"]
+        case .ollama:
+            // Ollama doesn't require a key
+            apiKey = nil
+        }
+        
+        // For non-Ollama providers, require a key
+        if provider != .ollama, (apiKey ?? "").isEmpty {
+            print("[MemoryProcessor] No API key found for provider \(provider.displayName). Set OPENAI_API_KEY or ANTHROPIC_API_KEY.")
+            isEnabled = false
+            return false
+        }
+        
+        // Configure embedding service (OpenAI embeddings)
+        var embedConfig = EmbeddingConfig.default
+        embedConfig.provider = provider == .openai ? .openai : .unsupported
+        embedConfig.apiKey = apiKey
+        embedConfig.model = env["CORTEX_EMBED_MODEL"] ?? embedConfig.model
+        embedConfig.baseURL = baseURL ?? embedConfig.baseURL
+        Task { await embeddingService.updateConfig(embedConfig) }
+        
+        configure(provider: provider, apiKey: apiKey, model: model, baseURL: baseURL)
+        return isEnabled
     }
     
     // MARK: - Main Processing Methods
     
     /// Add a raw memory to the processing queue
-    func queueForProcessing(_ memory: Memory) {
+    func queueForProcessing(_ memory: Memory) async {
         guard isEnabled else {
             print("[MemoryProcessor] Not enabled, skipping: \(memory.preview)")
+            return
+        }
+        
+        // Avoid re-processing the same raw memory if already processed
+        if let store = extractedMemoryStore,
+           (try? await store.hasBeenProcessed(rawMemoryId: memory.id)) == true {
+            print("[MemoryProcessor] Already processed raw memory \(memory.id), skipping")
             return
         }
         
@@ -93,11 +163,61 @@ final class MemoryProcessor: ObservableObject {
                     processedCount += 1
                     print("[MemoryProcessor] ✓ Extracted \(result.memories.count) memories from: \(memory.preview)")
                     
-                    // TODO: Save extracted memories to storage
-                    // This will be wired up to ExtractedMemoryStore
+                    // Persist extracted memories
+                    if let store = extractedMemoryStore {
+                        // Generate embeddings per memory (best-effort)
+                        var enriched: [(memory: ExtractedMemory, embedding: [Double]?, embeddingModel: String?)] = []
+                        for data in result.memories {
+                            let embeddingResult: ([Double]?, String?)
+                            if isEnabled {
+                                do {
+                                    let (vec, model) = try await embeddingService.embed(text: data.content)
+                                    embeddingResult = (vec, model)
+                                } catch {
+                                    embeddingResult = (nil, nil)
+                                }
+                            } else {
+                                embeddingResult = (nil, nil)
+                            }
+                            
+                            let mem = ExtractedMemory(
+                                id: UUID().uuidString,
+                                createdAt: Date(),
+                                content: data.content,
+                                type: data.type,
+                                confidence: data.confidence,
+                                tags: data.tags,
+                                sourceMemoryId: memory.id,
+                                sourceApp: memory.appName,
+                                isActive: true,
+                                expiresAt: data.expiresAt,
+                                relatedMemoryIds: [],
+                                embedding: embeddingResult.0,
+                                embeddingModel: embeddingResult.1
+                            )
+                            enriched.append((mem, embeddingResult.0, embeddingResult.1))
+                        }
+                        
+                        try await store.saveMemories(enriched)
+                        try await store.logProcessing(
+                            rawMemoryId: memory.id,
+                            wasWorthRemembering: true,
+                            reason: nil,
+                            extractedCount: enriched.count
+                        )
+                    }
                     
                 } else {
                     print("[MemoryProcessor] Skipped (not worth remembering): \(memory.preview)")
+                    
+                    if let store = extractedMemoryStore {
+                        try await store.logProcessing(
+                            rawMemoryId: memory.id,
+                            wasWorthRemembering: false,
+                            reason: result.processingNote,
+                            extractedCount: 0
+                        )
+                    }
                 }
             } catch {
                 lastError = error.localizedDescription
@@ -115,7 +235,27 @@ final class MemoryProcessor: ObservableObject {
     /// Process a single memory: filter + extract
     func processMemory(_ memory: Memory) async throws -> MemoryExtractionResult {
         // Stage 1: Check if worth remembering
-        let worthiness = try await checkWorthiness(memory)
+        // Be resilient: if LLM fails, fall back to simple heuristic (length-based)
+        let worthiness: MemoryWorthinessResult
+        do {
+            worthiness = try await checkWorthiness(memory)
+        } catch {
+            let text = memory.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isWorth = text.count >= 10 // simple fallback: non-trivial messages
+            print("[MemoryProcessor] Worthiness check failed, using heuristic (len=\(text.count), worth=\(isWorth)): \(error)")
+            if !isWorth {
+                return MemoryExtractionResult(
+                    memories: [],
+                    wasProcessed: false,
+                    processingNote: "Heuristic: text too short or uninformative"
+                )
+            }
+            worthiness = MemoryWorthinessResult(
+                isWorthRemembering: true,
+                reason: "Heuristic: long enough message, LLM unavailable",
+                suggestedTypes: [.insight]
+            )
+        }
         
         if !worthiness.isWorthRemembering {
             return MemoryExtractionResult(
@@ -126,7 +266,51 @@ final class MemoryProcessor: ObservableObject {
         }
         
         // Stage 2: Extract structured memories
-        let extractedMemories = try await extractMemories(memory, suggestedTypes: worthiness.suggestedTypes)
+        var extractedMemories: [ExtractedMemoryData]
+        do {
+            extractedMemories = try await extractMemories(memory, suggestedTypes: worthiness.suggestedTypes)
+        } catch {
+            // Fallback: if extraction fails (e.g. LLM/network), create a single generic memory
+            print("[MemoryProcessor] Extraction failed, using raw text as a single memory: \(error)")
+            let text = memory.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else {
+                return MemoryExtractionResult(
+                    memories: [],
+                    wasProcessed: false,
+                    processingNote: "Extraction failed and text was empty"
+                )
+            }
+            let fallback = ExtractedMemoryData(
+                content: text,
+                type: .insight,
+                confidence: 0.4,
+                tags: [],
+                expiresAt: nil
+            )
+            extractedMemories = [fallback]
+        }
+        
+        // If LLM returned no memories at all, also fall back to a single generic one
+        if extractedMemories.isEmpty {
+            let text = memory.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                print("[MemoryProcessor] LLM returned 0 memories, falling back to generic memory for: \(memory.preview)")
+                let fallback = ExtractedMemoryData(
+                    content: text,
+                    type: .insight,
+                    confidence: 0.5,
+                    tags: [],
+                    expiresAt: nil
+                )
+                extractedMemories = [fallback]
+            } else {
+                return MemoryExtractionResult(
+                    memories: [],
+                    wasProcessed: false,
+                    processingNote: "Empty text after extraction"
+                )
+            }
+        }
         
         return MemoryExtractionResult(
             memories: extractedMemories,

@@ -42,6 +42,17 @@ struct ExtractedMemory: Identifiable, Codable, Hashable {
     /// Relationships to other memories
     let relatedMemoryIds: [String]
     
+    /// Optional embedding vector for semantic search
+    let embedding: [Double]?
+    
+    /// Model used to generate embedding
+    let embeddingModel: String?
+    
+    /// Convenience: does this memory have an embedding
+    var hasEmbedding: Bool {
+        embedding != nil && !(embedding?.isEmpty ?? true)
+    }
+    
     // MARK: - Display Helpers
     
     var preview: String {

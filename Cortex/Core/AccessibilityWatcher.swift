@@ -68,6 +68,11 @@ final class AccessibilityWatcher: ObservableObject {
     /// Track previous app to detect app switches
     private var previousAppBundleId: String = ""
     
+    /// Expose current AX element for overlay positioning
+    func currentAXElement() -> AXUIElement? {
+        return currentElement
+    }
+    
     // MARK: - Configuration
     
     /// How long after last edit to consider text as "recently edited"
@@ -333,6 +338,9 @@ final class AccessibilityWatcher: ObservableObject {
                 }
             }
         }
+        
+        // Notify overlay manager candidate to update (via observers in AppDelegate)
+        // We'll use AppState notifications indirectly, so nothing to do here directly.
     }
     
     private func handleFocusChange(from oldElement: AXUIElement?, to newElement: AXUIElement) {

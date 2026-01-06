@@ -23,6 +23,7 @@ final class CaptureCoordinator: ObservableObject {
     private let keyEventListener: KeyEventListener
     private let memoryStore: MemoryStore
     private let permissionsManager: PermissionsManager
+    private let memoryProcessor: MemoryProcessor?
     
     // MARK: - State
     
@@ -36,12 +37,14 @@ final class CaptureCoordinator: ObservableObject {
         accessibilityWatcher: AccessibilityWatcher,
         keyEventListener: KeyEventListener,
         memoryStore: MemoryStore,
-        permissionsManager: PermissionsManager
+        permissionsManager: PermissionsManager,
+        memoryProcessor: MemoryProcessor? = nil
     ) {
         self.accessibilityWatcher = accessibilityWatcher
         self.keyEventListener = keyEventListener
         self.memoryStore = memoryStore
         self.permissionsManager = permissionsManager
+        self.memoryProcessor = memoryProcessor
         
         setupCallbacks()
     }
@@ -327,6 +330,13 @@ final class CaptureCoordinator: ObservableObject {
             }
             
             print("[CaptureCoordinator] ✓✓✓ Saved memory from \(appName) via \(source.rawValue)")
+            
+            // Kick off AI extraction if enabled
+            if let processor = memoryProcessor, processor.isEnabled {
+                Task { @MainActor in
+                    await processor.queueForProcessing(memory)
+                }
+            }
             
         } catch {
             print("[CaptureCoordinator] Failed to save memory: \(error)")
