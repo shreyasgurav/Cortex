@@ -17,7 +17,7 @@ final class ExtractedMemoryStore: @unchecked Sendable {
     
     private var db: OpaquePointer?
     private let dbPath: String
-    private let queue = DispatchQueue(label: "com.cortex.extracted-store", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "com.Cortex.extracted-store", qos: .userInitiated)
     
     // MARK: - Initialization
     

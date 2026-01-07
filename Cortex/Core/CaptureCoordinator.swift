@@ -31,6 +31,9 @@ final class CaptureCoordinator: ObservableObject {
     @Published private(set) var lastCapturedText: String = ""
     @Published private(set) var captureCount: Int = 0
     
+    private let contextWindow = ContextWindow()
+    private var memoryConsolidator: MemoryConsolidator?
+    
     // MARK: - Initialization
     
     init(
@@ -45,6 +48,14 @@ final class CaptureCoordinator: ObservableObject {
         self.memoryStore = memoryStore
         self.permissionsManager = permissionsManager
         self.memoryProcessor = memoryProcessor
+        
+        if let processor = memoryProcessor, let store = processor.extractedMemoryStore {
+            self.memoryConsolidator = MemoryConsolidator(
+                embeddingService: EmbeddingService(),
+                llmService: LLMService(config: .default),
+                extractedMemoryStore: store
+            )
+        }
         
         setupCallbacks()
     }
@@ -215,7 +226,7 @@ final class CaptureCoordinator: ObservableObject {
         let appNames = [
             "google chrome", "safari", "firefox", "cursor", "xcode", "slack",
             "discord", "notion", "finder", "terminal", "messages", "mail",
-            "spotify", "zoom", "teams", "cortex", "code", "visual studio"
+            "spotify", "zoom", "teams", "Cortex", "code", "visual studio"
         ]
         
         if appNames.contains(lowercased) {
@@ -299,6 +310,12 @@ final class CaptureCoordinator: ObservableObject {
             return
         }
         
+        // WHITELIST CHECK: Only capture if app is enabled
+        if !AppState.shared.isAppEnabled(appBundleId) {
+            print("[CaptureCoordinator] App not allowed, skipping: \(appBundleId)")
+            return
+        }
+        
         // Validate text
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         
@@ -340,8 +357,14 @@ final class CaptureCoordinator: ObservableObject {
         do {
             print("[CaptureCoordinator] 🧠 Checking if worth remembering: '\(memory.preview)'")
             
-            // Stage 1: Check worthiness
-            let worthiness = try await processor.checkWorthiness(memory)
+            // Get context for this app
+            let context = contextWindow.getContext(for: memory.appName)
+            
+            // Stage 1: Check worthiness with context
+            let worthiness = try await processor.checkWorthiness(memory, context: context)
+            
+            // Add to context window regardless of worthiness (to track conversation flow)
+            contextWindow.addMessage(memory.text, appName: memory.appName)
             
             if !worthiness.isWorthRemembering {
                 print("[CaptureCoordinator] ✗ Skipped (not worth remembering): \(worthiness.reason)")
@@ -360,30 +383,42 @@ final class CaptureCoordinator: ObservableObject {
             
             print("[CaptureCoordinator] ✓ Worth remembering! Extracting memories...")
             
-            // Stage 2: Extract structured memories
-            let extracted = try await processor.extractMemories(memory, suggestedTypes: worthiness.suggestedTypes)
+            // Stage 2: Extract structured memories with context
+            let extracted = try await processor.extractMemories(memory, suggestedTypes: worthiness.suggestedTypes, context: context)
             
             if extracted.isEmpty {
                 print("[CaptureCoordinator] ✗ No memories extracted")
                 return
             }
             
-            print("[CaptureCoordinator] ✓ Extracted \(extracted.count) memories")
+            print("[CaptureCoordinator] ✓ Extracted \(extracted.count) memories. Consolidating...")
             
-            // Stage 3: Save extracted memories with embeddings
-            try await processor.saveExtractedMemories(extracted, sourceMemory: memory)
+            // Stage 3: Consolidate and Save
+            for data in extracted {
+                // Generate embedding first for consolidation
+                let (vec, model) = (try? await EmbeddingService().embed(text: data.content)) ?? (nil, nil)
+                
+                if let vec = vec, let consolidator = memoryConsolidator {
+                    let wasConsolidated = try await consolidator.consolidate(data, embedding: vec, sourceMemory: memory)
+                    if wasConsolidated {
+                        continue // Memory was merged/strengthened, don't save as new
+                    }
+                }
+                
+                // If not consolidated, save as new via processor (which handles embeddings again, but that's okay for now)
+                try await processor.saveExtractedMemories([data], sourceMemory: memory)
+            }
             
             // Reload extracted memories to update UI
             AppState.shared.loadExtractedMemories()
             
-            // Update UI state (but don't add to raw memories list)
+            // Update UI state
             await MainActor.run {
                 lastCapturedText = memory.preview
                 captureCount += 1
-                // Note: We don't add to AppState.shared.memories since we're not saving raw
             }
             
-            print("[CaptureCoordinator] ✓✓✓ Saved \(extracted.count) extracted memories from \(memory.appName)")
+            print("[CaptureCoordinator] ✓✓✓ Processed \(extracted.count) memories from \(memory.appName)")
             
         } catch {
             print("[CaptureCoordinator] AI filtering failed: \(error)")

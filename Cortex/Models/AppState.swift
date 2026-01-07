@@ -66,9 +66,41 @@ final class AppState: ObservableObject {
     /// Capture statistics
     @Published var captureCount: Int = 0
     
+    // MARK: - App Whitelist (Strict Mode)
+    
+    /// Set of bundle IDs that are allowed to use Cortex
+    @Published var enabledBundleIds: Set<String> = [] {
+        didSet {
+            let array = Array(enabledBundleIds)
+            UserDefaults.standard.set(array, forKey: "Cortex_enabled_apps")
+        }
+    }
+    
     // MARK: - Dependencies
     private var memoryStore: MemoryStore?
     private var extractedMemoryStore: ExtractedMemoryStore?
+    
+    // MARK: - App Permission Helpers
+    
+    func isAppEnabled(_ bundleId: String) -> Bool {
+        return enabledBundleIds.contains(bundleId)
+    }
+    
+    func toggleAppResult(_ bundleId: String) {
+        if enabledBundleIds.contains(bundleId) {
+            enabledBundleIds.remove(bundleId)
+        } else {
+            enabledBundleIds.insert(bundleId)
+        }
+    }
+    
+    func setAppEnabled(_ bundleId: String, enabled: Bool) {
+        if enabled {
+            enabledBundleIds.insert(bundleId)
+        } else {
+            enabledBundleIds.remove(bundleId)
+        }
+    }
     
     // MARK: - Initialization
     
@@ -87,6 +119,13 @@ final class AppState: ObservableObject {
             UserDefaults.standard.set(true, forKey: "filterBeforeSaving")
         } else {
             filterBeforeSaving = UserDefaults.standard.bool(forKey: "filterBeforeSaving")
+        }
+        
+        // Load enabled apps
+        if let savedApps = UserDefaults.standard.array(forKey: "Cortex_enabled_apps") as? [String] {
+            enabledBundleIds = Set(savedApps)
+        } else {
+            enabledBundleIds = []
         }
     }
     

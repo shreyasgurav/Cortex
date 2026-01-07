@@ -30,10 +30,14 @@ final class ContextDetector {
     
     /// Best-effort: current text context + approximate bounds of focused element
     func currentContext() -> Context? {
-        let text = accessibilityWatcher.getTrackedText()
-        if text.isEmpty {
+        // Primary check: do we have a focused element?
+        guard let element = accessibilityWatcher.currentAXElement() else {
             return nil
         }
+        
+        let text = accessibilityWatcher.getTrackedText()
+        // We no longer return nil for empty text, because we want the overlay 
+        // to stay visible (as a 'plus' button) even in fresh fields.
         
         let appName = accessibilityWatcher.currentAppName
         let bundleId = accessibilityWatcher.currentAppBundleId

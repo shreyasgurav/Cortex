@@ -57,15 +57,21 @@ final class MemoryOverlayManager: ObservableObject {
             return
         }
         
-        guard let context = contextDetector.currentContext(),
-              !context.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            
-            // Context is lost or empty. Debounce the hide to prevent flickering.
+        
+        
+        guard let context = contextDetector.currentContext() else {
+            // No focused element at all. Debounce the hide to prevent flickering.
             scheduleDebouncedHide()
             return
         }
         
-        // Context is VALID. Cancel any pending hide.
+        // WHITELIST CHECK: Only show working overlay if app is enabled
+        if !AppState.shared.isAppEnabled(context.bundleId) {
+            hideOverlay()
+            return
+        }
+        
+        // Context is VALID (focused on an app). Cancel any pending hide.
         hideDebounceTask?.cancel()
         hideDebounceTask = nil
         autoHideTask?.cancel()
@@ -74,17 +80,21 @@ final class MemoryOverlayManager: ObservableObject {
         // Ensure visible immediately
         isVisible = true
         
-        let trimmedText = context.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        
         showOverlay(with: context)
         
-        // Only trigger search if text has changed
-        if trimmedText != lastSearchedText {
-            print("[MemoryOverlay] Triggering search. Text changed: '\(lastSearchedText ?? "nil")' -> '\(trimmedText)'")
-            lastSearchedText = trimmedText
-            triggerBackgroundSearch(for: context.text)
+        // Only trigger search if text is not empty and has changed
+        let trimmedText = context.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedText.isEmpty {
+            if trimmedText != lastSearchedText {
+                print("[MemoryOverlay] Triggering search. Text changed: '\(lastSearchedText ?? "nil")' -> '\(trimmedText)'")
+                lastSearchedText = trimmedText
+                triggerBackgroundSearch(for: context.text)
+            }
         } else {
-             // print("[MemoryOverlay] Text unchanged, skipping search")
+            // Text is empty or whitespace - stay in idle/plus mode
+            overlayState = .idle
+            lastSearchedText = nil
+            searchTask?.cancel()
         }
     }
     
@@ -295,33 +305,52 @@ final class MemoryOverlayManager: ObservableObject {
     public func insertRelatedMemories() async {
         guard let context = contextDetector.currentContext() else { return }
         
-        overlayState = .inserting
-        defer { overlayState = .idle }
-        
-        // Use cached memories if available and context matches (roughly)
-        // Or if not available, try immediate search? 
-        // User said "keep loading... in background", and "as i click... add memories"
-        // If we have cached results, use them. If not (maybe typed too fast), try searching now.
-        
-        var memoriesToInsert = cachedMemories
-        
-        if memoriesToInsert.isEmpty {
-            // Try explicit search if cache is empty
-            do {
-                memoriesToInsert = try await searchService.searchRelatedMemories(for: context.text, topK: 5)
-            } catch {
-                print("[MemoryOverlay] Search failed: \(error)")
-                return
-            }
-        }
-        
-        if memoriesToInsert.isEmpty {
-            print("[MemoryOverlay] No related memories found to insert")
+        // If we have search results, insert them
+        if !cachedMemories.isEmpty {
+            overlayState = .inserting
+            print("[MemoryOverlay] Inserting \(cachedMemories.count) related memories")
+            insertService.insertMemories(cachedMemories)
+            try? await Task.sleep(nanoseconds: 500 * 1_000_000)
+            overlayState = .idle
             return
         }
         
-        print("[MemoryOverlay] Inserting \(memoriesToInsert.count) related memories")
-        insertService.insertMemories(memoriesToInsert)
+        // If no search results but text exists, treat as "Manual Capture"?
+        // Or if the user just wants to add a memory manually.
+        await manualAddMemory()
+    }
+    
+    /// Explicitly save the current text as a memory
+    public func manualAddMemory() async {
+        guard let context = contextDetector.currentContext() else { return }
+        let text = context.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        guard !text.isEmpty else {
+            print("[MemoryOverlay] Cannot add empty memory")
+            return
+        }
+        
+        overlayState = .loading
+        print("[MemoryOverlay] Manually adding memory: \(text.prefix(50))...")
+        
+        // We use the same capture logic as CaptureCoordinator but triggered manually
+        // We'll notify the AppState directly to show immediate feedback
+        let memory = Memory(
+            id: UUID().uuidString,
+            createdAt: Date(),
+            appBundleId: context.bundleId,
+            appName: context.appName,
+            windowTitle: context.windowTitle,
+            source: .enterKey, // Manual add is treated as explicit intent
+            text: text,
+            textHash: MemoryStore.hashText(text)
+        )
+        
+        AppState.shared.addMemory(memory)
+        // Also trigger extraction/save in background
+        // For now, just show success
+        try? await Task.sleep(nanoseconds: 500 * 1_000_000)
+        overlayState = .idle
     }
 }
 

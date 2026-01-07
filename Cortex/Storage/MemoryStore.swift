@@ -17,7 +17,7 @@ final class MemoryStore: @unchecked Sendable {
     
     private var db: OpaquePointer?
     private let dbPath: String
-    private let queue = DispatchQueue(label: "com.cortex.store", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "com.Cortex.store", qos: .userInitiated)
     
     /// Cache of recent text hashes for deduplication
     /// Maps (hash, appBundleId) -> timestamp

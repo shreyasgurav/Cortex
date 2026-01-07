@@ -16,16 +16,16 @@ struct ExtractedMemory: Identifiable, Codable, Hashable {
     let createdAt: Date
     
     /// The extracted fact/insight/preference
-    let content: String
+    var content: String
     
     /// Type of memory
-    let type: MemoryType
+    var type: MemoryType
     
     /// Confidence score (0.0 - 1.0)
-    let confidence: Double
+    var confidence: Double
     
     /// Tags for categorization
-    let tags: [String]
+    var tags: [String]
     
     /// Source raw memory ID (links back to the original capture)
     let sourceMemoryId: String
@@ -34,13 +34,13 @@ struct ExtractedMemory: Identifiable, Codable, Hashable {
     let sourceApp: String
     
     /// Whether this memory is still relevant (can be "forgotten")
-    let isActive: Bool
+    var isActive: Bool
     
     /// Optional expiry date (some memories are time-sensitive)
-    let expiresAt: Date?
+    var expiresAt: Date?
     
     /// Relationships to other memories
-    let relatedMemoryIds: [String]
+    var relatedMemoryIds: [String]
     
     /// Optional embedding vector for semantic search
     let embedding: [Double]?

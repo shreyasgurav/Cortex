@@ -10,322 +10,201 @@ import SwiftUI
 /// Main window that displays all captured memories
 struct MemoryWindowView: View {
     @ObservedObject var appState: AppState
-    @State private var selectedMemory: Memory?
+    @State private var navigationSelection: NavigationItem? = .memories
     @State private var searchText: String = ""
-    @State private var showDeleteConfirmation = false
+    
+    enum NavigationItem {
+        case memories
+        case apps
+    }
     
     var body: some View {
         NavigationSplitView {
-            // Sidebar - Memory list
-            memoryList
-                .frame(minWidth: 280)
+            // SIDEBAR
+            List(selection: $navigationSelection) {
+                Label("Memories", systemImage: "clock")
+                    .tag(NavigationItem.memories)
+                Label("Allowed Apps", systemImage: "checkmark.shield")
+                    .tag(NavigationItem.apps)
+            }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 200, ideal: 250)
         } detail: {
-            // Detail view
-            if let memory = selectedMemory {
-                MemoryDetailView(memory: memory, onDelete: {
-                    appState.deleteMemory(memory)
-                    selectedMemory = nil
-                })
+            // MAIN CONTENT (Right Side)
+            if let selection = navigationSelection {
+                switch selection {
+                case .memories:
+                    MemoriesContentView(appState: appState, searchText: $searchText)
+                case .apps:
+                    AppsView(appState: appState)
+                }
             } else {
-                emptyDetailView
+                Text("Select an item")
+                    .foregroundColor(.secondary)
             }
         }
-        .frame(minWidth: 700, minHeight: 500)
+        .frame(minWidth: 800, minHeight: 600)
         .navigationTitle("Cortex")
     }
-    
-    // MARK: - Memory List
-    
-    private var memoryList: some View {
-        VStack(spacing: 0) {
-            // Search bar
-            searchBar
-                .padding()
-            
-            Divider()
-            
-            // List
-            if filteredMemories.isEmpty {
-                emptyListView
-            } else {
-                if appState.filterBeforeSaving {
-                    // Show extracted memories
-                    List(filteredExtractedMemories, selection: $selectedMemory) { memory in
-                        ExtractedMemoryRowView(memory: memory)
-                            .tag(Memory(
-                                id: memory.id,
-                                createdAt: memory.createdAt,
-                                appBundleId: "",
-                                appName: memory.sourceApp,
-                                windowTitle: "",
-                                source: .enterKey,
-                                text: memory.content,
-                                textHash: ""
-                            ))
-                    }
-                    .listStyle(.sidebar)
-                } else {
-                    // Show raw memories
-                    List(filteredRawMemories, selection: $selectedMemory) { memory in
-                        MemoryRowView(memory: memory, isSelected: selectedMemory?.id == memory.id)
-                            .tag(memory)
-                    }
-                    .listStyle(.sidebar)
-                }
-            }
-            
-            Divider()
-            
-            // Footer
-            listFooter
-        }
-    }
-    
-    private var searchBar: some View {
-        HStack {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(.secondary)
-            
-            TextField("Search memories...", text: $searchText)
-                .textFieldStyle(.plain)
-            
-            if !searchText.isEmpty {
-                Button(action: { searchText = "" }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(8)
-        .background(Color.secondary.opacity(0.1))
-        .cornerRadius(8)
-    }
-    
-    private var filteredRawMemories: [Memory] {
-        if searchText.isEmpty {
-            return appState.memories
-        }
-        
-        let lowercasedSearch = searchText.lowercased()
-        return appState.memories.filter { memory in
-            memory.text.lowercased().contains(lowercasedSearch) ||
-            memory.appName.lowercased().contains(lowercasedSearch)
-        }
-    }
-    
-    private var filteredExtractedMemories: [ExtractedMemory] {
-        if searchText.isEmpty {
-            return appState.extractedMemories
-        }
-        
-        let lowercasedSearch = searchText.lowercased()
-        return appState.extractedMemories.filter { memory in
-            memory.content.lowercased().contains(lowercasedSearch) ||
-            memory.sourceApp.lowercased().contains(lowercasedSearch) ||
-            memory.type.displayName.lowercased().contains(lowercasedSearch) ||
-            memory.tags.contains(where: { $0.lowercased().contains(lowercasedSearch) })
-        }
-    }
-    
-    private var filteredMemories: [Any] {
-        appState.filterBeforeSaving ? filteredExtractedMemories : filteredRawMemories
-    }
-    
-    private var listFooter: some View {
-        let memoryCount = appState.filterBeforeSaving ? appState.extractedMemories.count : appState.memories.count
-        
-        return HStack {
-            Text("\(memoryCount) memories")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            
-            Spacer()
-            
-            Button(action: { showDeleteConfirmation = true }) {
-                Label("Clear All", systemImage: "trash")
-                    .font(.caption)
-            }
-            .buttonStyle(.plain)
-            .foregroundColor(.red)
-            .disabled(memoryCount == 0)
-        }
-        .padding(12)
-        .alert("Clear All Memories?", isPresented: $showDeleteConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Clear All", role: .destructive) {
-                appState.clearAllMemories()
-                selectedMemory = nil
-            }
-        } message: {
-            Text("This action cannot be undone. All \(memoryCount) memories will be permanently deleted.")
-        }
-    }
-    
-    // MARK: - Empty States
-    
-    private var emptyListView: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            
-            Image(systemName: searchText.isEmpty ? "tray" : "magnifyingglass")
-                .font(.system(size: 48))
-                .foregroundColor(.secondary.opacity(0.5))
-            
-            Text(searchText.isEmpty ? "No memories yet" : "No matches found")
-                .font(.headline)
-                .foregroundColor(.secondary)
-            
-            Text(searchText.isEmpty ? 
-                 "Start typing in any app and your text will be captured here." :
-                 "Try a different search term.")
-                .font(.subheadline)
-                .foregroundColor(.secondary.opacity(0.7))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-            
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-    
-    private var emptyDetailView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "text.alignleft")
-                .font(.system(size: 48))
-                .foregroundColor(.secondary.opacity(0.5))
-            
-            Text("Select a memory")
-                .font(.headline)
-                .foregroundColor(.secondary)
-            
-            Text("Choose a memory from the list to view its full content")
-                .font(.subheadline)
-                .foregroundColor(.secondary.opacity(0.7))
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
 }
 
-// MARK: - Memory Row
+// MARK: - Memories Content View (Right Side)
 
-struct MemoryRowView: View {
-    let memory: Memory
-    let isSelected: Bool
-    
-    var body: some View {
-        Text(memory.text)
-            .font(.subheadline)
-            .lineLimit(3)
-            .foregroundColor(.primary)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-    }
-}
-
-// MARK: - Memory Detail
-
-struct MemoryDetailView: View {
-    let memory: Memory
-    let onDelete: () -> Void
-    
-    @State private var showCopied = false
+struct MemoriesContentView: View {
+    @ObservedObject var appState: AppState
+    @Binding var searchText: String
+    @State private var hoveredMemoryId: String?
+    @State private var showDeleteConfirmation = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header
-            detailHeader
-                .padding()
+            // Header / Search
+            HStack {
+                Text("Memories")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                
+                Spacer()
+                
+                // Search Bar (Centered via Spacers)
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.secondary)
+                    TextField("Search memories...", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .frame(width: 250)
+                }
+                .padding(8)
+                .padding(.horizontal, 4)
+                .background(Color(nsColor: .quaternaryLabelColor).opacity(0.4))
+                .cornerRadius(8)
+                
+                Spacer()
+                
+                // Delete All Button
+                Button(action: { showDeleteConfirmation = true }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "trash")
+                        Text("Delete All")
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.red.opacity(0.8))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.red.opacity(0.1))
+                    .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+                .help("Delete All Memories")
+                .disabled(appState.memories.isEmpty)
+            }
+            .padding()
+            .background(Color(nsColor: .windowBackgroundColor))
             
             Divider()
             
             // Content
             ScrollView {
-                Text(memory.text)
-                    .font(.body)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
+                LazyVStack(spacing: 6) {
+                    if filteredMemories.isEmpty {
+                        emptyState
+                    } else {
+                        ForEach(filteredMemories) { memory in
+                            MemoryCardView(
+                                memory: memory,
+                                isHovered: hoveredMemoryId == memory.id,
+                                onDelete: {
+                                    appState.deleteMemory(memory)
+                                }
+                            )
+                            .onHover { isHovering in
+                                if isHovering {
+                                    hoveredMemoryId = memory.id
+                                } else if hoveredMemoryId == memory.id {
+                                    hoveredMemoryId = nil
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(12)
             }
-            
-            Divider()
-            
-            // Actions
-            detailActions
-                .padding()
         }
         .background(Color(nsColor: .textBackgroundColor))
-    }
-    
-    private var detailHeader: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(memory.appName)
-                    .font(.headline)
-                
-                Spacer()
-                
-                Text(memory.fullFormattedDate)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+        .alert("Clear All Memories?", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear All", role: .destructive) {
+                appState.clearAllMemories()
             }
-            
-            if !memory.windowTitle.isEmpty {
-                Text(memory.windowTitle)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-            }
+        } message: {
+            Text("This action cannot be undone. All memories will be permanently deleted.")
         }
     }
     
-    private var detailActions: some View {
-        HStack {
-            // Copy button
-            Button(action: copyToClipboard) {
-                Label(showCopied ? "Copied!" : "Copy", systemImage: showCopied ? "checkmark" : "doc.on.doc")
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(showCopied ? .green : .accentColor)
-            
-            Spacer()
-            
-            // Delete button
-            Button(role: .destructive, action: onDelete) {
-                Label("Delete", systemImage: "trash")
-            }
-            .buttonStyle(.bordered)
-        }
+    // Helpers
+    private var filteredMemories: [Memory] {
+        if searchText.isEmpty { return appState.memories }
+        return appState.memories.filter { $0.text.localizedCaseInsensitiveContains(searchText) }
     }
     
-    private func copyToClipboard() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(memory.text, forType: .string)
-        
-        withAnimation {
-            showCopied = true
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            withAnimation {
-                showCopied = false
-            }
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Spacer().frame(height: 100)
+            Image(systemName: "tray")
+                .font(.system(size: 40))
+                .foregroundColor(.secondary.opacity(0.3))
+            Text(searchText.isEmpty ? "No memories captured yet" : "No matches found")
+                .foregroundColor(.secondary)
         }
     }
 }
 
-// MARK: - Extracted Memory Row
+// MARK: - Memory Card
 
-struct ExtractedMemoryRowView: View {
-    let memory: ExtractedMemory
+struct MemoryCardView: View {
+    let memory: Memory
+    let isHovered: Bool
+    let onDelete: () -> Void
+    @State private var isTrashHovered = false
     
     var body: some View {
-        Text(memory.content)
-            .font(.subheadline)
-            .lineLimit(3)
-            .foregroundColor(.primary)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
+        HStack(alignment: .center, spacing: 12) {
+            // Memory Text
+            Text(memory.text)
+                .font(.system(size: 14))
+                .foregroundColor(.primary)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, 24) // reserve space for the delete button
+            
+            // Delete Button Area (Fixed width to prevent text shift)
+            ZStack {
+                if isHovered {
+                    Button(action: onDelete) {
+                        Image(systemName: "trash")
+                            .foregroundColor(.red)
+                            .font(.system(size: 15))
+                            .opacity(isTrashHovered ? 1.0 : 0.6)
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { hovering in
+                        withAnimation(.easeInOut(duration: 0.1)) {
+                            isTrashHovered = hovering
+                        }
+                    }
+                    .transition(.opacity)
+                }
+            }
+            .frame(width: 24, height: 24) // Fixed size container
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(isHovered ? Color.secondary.opacity(0.1) : Color.clear)
+        )
+        .contentShape(Rectangle()) 
     }
 }
+
 

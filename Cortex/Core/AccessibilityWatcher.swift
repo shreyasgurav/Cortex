@@ -252,7 +252,7 @@ final class AccessibilityWatcher: ObservableObject {
         let appNames = [
             "google chrome", "safari", "firefox", "cursor", "xcode", "slack",
             "discord", "notion", "finder", "terminal", "messages", "mail",
-            "spotify", "zoom", "teams", "cortex", "code", "visual studio"
+            "spotify", "zoom", "teams", "Cortex", "code", "visual studio"
         ]
         
         // Exact match with app name

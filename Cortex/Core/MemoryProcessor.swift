@@ -288,34 +288,33 @@ final class MemoryProcessor: ObservableObject {
             }
             
             // Small delay between processing to avoid rate limits
-            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            try? await Task.sleep(nanoseconds: 500_000_000)
         }
         
         isProcessingQueue = false
         isProcessing = false
     }
     
-    /// Process a single memory: filter + extract
-    func processMemory(_ memory: Memory) async throws -> MemoryExtractionResult {
+    /// Process a single memory with context: filter + extract
+    func processMemory(_ memory: Memory, context: String? = nil) async throws -> MemoryExtractionResult {
         // Stage 1: Check if worth remembering
-        // Be resilient: if LLM fails, fall back to simple heuristic (length-based)
         let worthiness: MemoryWorthinessResult
         do {
-            worthiness = try await checkWorthiness(memory)
+            worthiness = try await checkWorthiness(memory, context: context)
         } catch {
             let text = memory.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            let isWorth = text.count >= 10 // simple fallback: non-trivial messages
-            print("[MemoryProcessor] Worthiness check failed, using heuristic (len=\(text.count), worth=\(isWorth)): \(error)")
+            let isWorth = text.count >= 10
+            print("[MemoryProcessor] Worthiness check failed, using heuristic (len=\(text.count), worth=\(isWorth)): \(error)") // Keep original print for more info
             if !isWorth {
                 return MemoryExtractionResult(
                     memories: [],
                     wasProcessed: false,
-                    processingNote: "Heuristic: text too short or uninformative"
+                    processingNote: "Heuristic: text too short"
                 )
             }
             worthiness = MemoryWorthinessResult(
                 isWorthRemembering: true,
-                reason: "Heuristic: long enough message, LLM unavailable",
+                reason: "Heuristic fallback",
                 suggestedTypes: [.insight]
             )
         }
@@ -331,16 +330,15 @@ final class MemoryProcessor: ObservableObject {
         // Stage 2: Extract structured memories
         var extractedMemories: [ExtractedMemoryData]
         do {
-            extractedMemories = try await extractMemories(memory, suggestedTypes: worthiness.suggestedTypes)
+            extractedMemories = try await extractMemories(memory, suggestedTypes: worthiness.suggestedTypes, context: context)
         } catch {
-            // Fallback: if extraction fails (e.g. LLM/network), create a single generic memory
-            print("[MemoryProcessor] Extraction failed, using raw text as a single memory: \(error)")
+            print("[MemoryProcessor] Extraction failed, using raw text as a single memory: \(error)") // Keep original print for more info
             let text = memory.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else {
                 return MemoryExtractionResult(
                     memories: [],
                     wasProcessed: false,
-                    processingNote: "Extraction failed and text was empty"
+                    processingNote: "Extraction failed"
                 )
             }
             let fallback = ExtractedMemoryData(
@@ -385,47 +383,49 @@ final class MemoryProcessor: ObservableObject {
     // MARK: - Stage 1: Worthiness Check
     
     /// Check if a memory is worth saving
-    func checkWorthiness(_ memory: Memory) async throws -> MemoryWorthinessResult {
+    func checkWorthiness(_ memory: Memory, context: String? = nil) async throws -> MemoryWorthinessResult {
+        let contextSection = context != nil ? "\nCONTEXT FROM PREVIOUS MESSAGES:\n\(context!)\n" : ""
         let prompt = """
-        Analyze this text that a user sent from the app "\(memory.appName)":
-        
+        You are a memory extraction system analyzing user text from the app "\(memory.appName)".
+        \(contextSection)
+        Determine if the NEW TEXT below contains information worth remembering about the user. Use this hierarchy:
+
+        ### TIER 1: Identity & Personal Facts (HI-PRIORITY)
+        - Name, location, job, medical conditions/allergies.
+        - Family structure, significant relationships.
+        - *Example*: "My name is Alex", "I'm allergic to peanuts", "I live in SF".
+
+        ### TIER 2: Preferences, Hobbies & Lifestyle (MED-PRIORITY)
+        - Personal likes/dislikes, hobbies, interests, and recurring activities.
+        - Tool preferences, work habits, and communication styles.
+        - *Example*: "I love playing guitar", "I work best in the morning", "I enjoy hiking".
+
+        ### TIER 3: Active Goals & Projects (MED-PRIORITY)
+        - Current objectives, deadlines, key decisions made, blockers.
+        - *Example*: "Building an app called Cortex", "Launch target is Q1".
+
+        ### TIER 4: Domain Knowledge & Expertise (LOW-PRIORITY)
+        - Specific technical knowledge or industry expertise.
+        - *Example*: "I know SwiftUI and Core Data".
+
+        ### DO NOT SAVE:
+        - Greetings ("Hi", "Thanks"), simple commands ("Search for X"), placeholder text, very short generic responses ("Ok", "Done").
+        - Random URLs or code snippets without context.
+
+        NEW TEXT TO ANALYZE:
         ---
         \(memory.text)
         ---
-        
-        Determine if this contains information worth remembering about the user.
-        
-        Worth remembering:
-        - Personal facts (name, location, job, etc.)
-        - Preferences (likes, dislikes, how they want things done)
-        - Goals and aspirations
-        - Projects they're working on
-        - Skills and expertise
-        - Relationships and people they mention
-        - Important events or deadlines
-        - Beliefs and opinions
-        - Questions they frequently ask
-        
-        NOT worth remembering:
-        - Generic greetings ("hi", "hello", "thanks")
-        - Simple commands ("search for X", "open file")
-        - Code snippets without context
-        - Random URLs without explanation
-        - Placeholder text
-        - Very short responses ("ok", "yes", "done")
-        
+
         Respond with JSON:
         {
             "isWorthRemembering": true/false,
-            "reason": "Brief explanation",
-            "suggestedTypes": ["fact", "preference", "goal", etc.]
+            "reason": "Brief explanation citing the Tier or reason for skip",
+            "suggestedTypes": ["fact", "preference", "goal", "skill", "insight", "relationship", "medical"]
         }
         """
         
-        let systemPrompt = """
-        You are a memory filter. Your job is to determine if text contains memorable information about a user.
-        Be selective - only flag things that reveal something meaningful about the person.
-        """
+        let systemPrompt = "You are a selective memory filter. Your goal is to identify information that builds a personal profile of the user, including their identity, lifestyle, preferences, and goals."
         
         return try await llmService.completeJSON(
             prompt: prompt,
@@ -437,58 +437,55 @@ final class MemoryProcessor: ObservableObject {
     // MARK: - Stage 2: Memory Extraction
     
     /// Extract structured memories from text
-    func extractMemories(_ memory: Memory, suggestedTypes: [MemoryType]) async throws -> [ExtractedMemoryData] {
+    func extractMemories(_ memory: Memory, suggestedTypes: [MemoryType], context: String? = nil) async throws -> [ExtractedMemoryData] {
         let typesString = suggestedTypes.map { $0.rawValue }.joined(separator: ", ")
+        let contextSection = context != nil ? "\n### CONTEXT FROM PREVIOUS MESSAGES:\n\(context!)\n" : ""
         
         let prompt = """
-        Extract specific, factual memories from this text sent by a user in "\(memory.appName)":
-        
+        Extract specific, factual memories from the NEW TEXT below, sent by a user in "\(memory.appName)".
+        \(contextSection)
+        ### NEW TEXT:
         ---
         \(memory.text)
         ---
-        
-        Suggested memory types to look for: \(typesString)
-        
-        Rules:
-        1. Each memory should be a single, atomic fact
-        2. Write memories in third person ("User prefers..." not "I prefer...")
-        3. Be specific and concrete
-        4. Include context when relevant
-        5. Don't invent information not present in the text
-        6. Assign confidence (0.0-1.0) based on how clear the information is
-        7. Add relevant tags for categorization
-        
-        Memory types:
-        - fact: Personal information (name, location, job)
-        - preference: What they like/dislike
-        - belief: Opinions and worldviews
-        - goal: What they want to achieve
-        - relationship: People they know
-        - event: Upcoming/past events with dates
-        - skill: Things they can do
-        - project: Work they're doing
-        - insight: General observations
-        - question: Topics they're curious about
-        - instruction: How they want things done
-        
+
+        ### EXTRACTION RULES:
+        1. **Atomic Facts**: Each memory must be a single, independent statement.
+        2. **Third Person**: ALWAYS use the third person. Use "User" (e.g., "User likes playing guitar" instead of "I like playing guitar"). NEVER use "I" or "my".
+        3. **Contextual**: Include critical context (e.g., "User prefers Python *for automation tasks*" rather than just "User likes Python").
+        4. **Factual**: Do not speculate. Only extract what is clearly stated.
+        5. **Confidence**: Assign 0.0-1.0 based on clarity.
+        6. **Formatting**: Present tense, clear and concise.
+
+        ### MEMORY TYPES:
+        - fact: Identity/Location/Job
+        - preference: Likes/Dislikes/Choices
+        - goal: Objectives/Deadlines
+        - skill: Expertise/Knowledge
+        - medical: Health/Allergies
+        - relationship: People/Connections
+        - insight: Patterns/Observations
+
+        ### EXAMPLES:
+        - Input: "I'm allergic to peanuts." -> "User has a peanut allergy." (Type: medical)
+        - Input: "I prefer SwiftUI over UIKit for new projects." -> "User prefers SwiftUI over UIKit for new projects." (Type: preference)
+        - Input: "Building an app called Cortex." -> "User is building an application named Cortex." (Type: goal)
+
         Respond with JSON:
         {
             "memories": [
                 {
-                    "content": "The extracted memory as a clear statement",
-                    "type": "fact/preference/goal/etc",
-                    "confidence": 0.0-1.0,
-                    "tags": ["relevant", "tags"],
-                    "expiresAt": null or "2024-12-31T00:00:00Z" for time-sensitive info
+                    "content": "The extracted memory",
+                    "type": "fact|preference|goal|skill|medical|relationship|insight",
+                    "confidence": 0.8,
+                    "tags": ["relevant", "keywords"],
+                    "expiresAt": null
                 }
             ]
         }
         """
         
-        let systemPrompt = """
-        You are a memory extraction system. Extract clear, factual memories from user messages.
-        Be precise and avoid speculation. Only extract what's clearly stated or strongly implied.
-        """
+        let systemPrompt = "You are a memory extraction system. Extract clear, atomic, third-person facts from user messages. Be precise and factual."
         
         struct ExtractionResponse: Codable {
             let memories: [ExtractedMemoryData]
