@@ -192,10 +192,29 @@ final class AppState: ObservableObject {
                 try await store.deleteMemory(id: memory.id)
                 await MainActor.run {
                     memories.removeAll { $0.id == memory.id }
-                    captureCount = memories.count
+                    if !filterBeforeSaving {
+                        captureCount = memories.count
+                    }
                 }
             } catch {
                 print("Failed to delete memory: \(error)")
+            }
+        }
+    }
+    
+    func deleteExtractedMemory(_ memory: ExtractedMemory) {
+        guard let store = extractedMemoryStore else { return }
+        Task {
+            do {
+                try await store.deleteMemory(id: memory.id)
+                await MainActor.run {
+                    extractedMemories.removeAll { $0.id == memory.id }
+                    if filterBeforeSaving {
+                        captureCount = extractedMemories.count
+                    }
+                }
+            } catch {
+                print("Failed to delete extracted memory: \(error)")
             }
         }
     }

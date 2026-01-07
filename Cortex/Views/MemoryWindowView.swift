@@ -60,13 +60,13 @@ struct MemoriesContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Header / Search
             HStack {
-                Text("Memories")
+                Text(appState.filterBeforeSaving ? "AI Memories" : "Raw Captures")
                     .font(.title2)
                     .fontWeight(.bold)
                 
                 Spacer()
                 
-                // Search Bar (Centered via Spacers)
+                // Search Bar
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .foregroundColor(.secondary)
@@ -95,8 +95,8 @@ struct MemoriesContentView: View {
                     .cornerRadius(6)
                 }
                 .buttonStyle(.plain)
-                .help("Delete All Memories")
-                .disabled(appState.memories.isEmpty)
+                .help("Delete All")
+                .disabled(appState.filterBeforeSaving ? appState.extractedMemories.isEmpty : appState.memories.isEmpty)
             }
             .padding()
             .background(Color(nsColor: .windowBackgroundColor))
@@ -106,22 +106,39 @@ struct MemoriesContentView: View {
             // Content
             ScrollView {
                 LazyVStack(spacing: 6) {
-                    if filteredMemories.isEmpty {
-                        emptyState
-                    } else {
-                        ForEach(filteredMemories) { memory in
-                            MemoryCardView(
-                                memory: memory,
-                                isHovered: hoveredMemoryId == memory.id,
-                                onDelete: {
-                                    appState.deleteMemory(memory)
+                    if appState.filterBeforeSaving {
+                        // DISPLAY EXTRACTED MEMORIES
+                        if filteredExtractedMemories.isEmpty {
+                            emptyState
+                        } else {
+                            ForEach(filteredExtractedMemories) { memory in
+                                ExtractedMemoryCardView(
+                                    memory: memory,
+                                    isHovered: hoveredMemoryId == memory.id,
+                                    onDelete: {
+                                        appState.deleteExtractedMemory(memory)
+                                    }
+                                )
+                                .onHover { isHovering in
+                                    hoveredMemoryId = isHovering ? memory.id : nil
                                 }
-                            )
-                            .onHover { isHovering in
-                                if isHovering {
-                                    hoveredMemoryId = memory.id
-                                } else if hoveredMemoryId == memory.id {
-                                    hoveredMemoryId = nil
+                            }
+                        }
+                    } else {
+                        // DISPLAY RAW MEMORIES
+                        if filteredMemories.isEmpty {
+                            emptyState
+                        } else {
+                            ForEach(filteredMemories) { memory in
+                                MemoryCardView(
+                                    memory: memory,
+                                    isHovered: hoveredMemoryId == memory.id,
+                                    onDelete: {
+                                        appState.deleteMemory(memory)
+                                    }
+                                )
+                                .onHover { isHovering in
+                                    hoveredMemoryId = isHovering ? memory.id : nil
                                 }
                             }
                         }
@@ -147,6 +164,11 @@ struct MemoriesContentView: View {
         return appState.memories.filter { $0.text.localizedCaseInsensitiveContains(searchText) }
     }
     
+    private var filteredExtractedMemories: [ExtractedMemory] {
+        if searchText.isEmpty { return appState.extractedMemories }
+        return appState.extractedMemories.filter { $0.content.localizedCaseInsensitiveContains(searchText) }
+    }
+    
     private var emptyState: some View {
         VStack(spacing: 16) {
             Spacer().frame(height: 100)
@@ -156,6 +178,54 @@ struct MemoriesContentView: View {
             Text(searchText.isEmpty ? "No memories captured yet" : "No matches found")
                 .foregroundColor(.secondary)
         }
+    }
+}
+
+// MARK: - Extracted Memory Card
+
+struct ExtractedMemoryCardView: View {
+    let memory: ExtractedMemory
+    let isHovered: Bool
+    let onDelete: () -> Void
+    @State private var isTrashHovered = false
+    
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            // Memory Text Only (User requested to hide type, date, icon)
+            Text(memory.content)
+                .font(.system(size: 14))
+                .foregroundColor(.primary)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, 24)
+            
+            // Delete Button Area
+            ZStack {
+                if isHovered {
+                    Button(action: onDelete) {
+                        Image(systemName: "trash")
+                            .foregroundColor(.red)
+                            .font(.system(size: 15))
+                            .opacity(isTrashHovered ? 1.0 : 0.6)
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { hovering in
+                        withAnimation(.easeInOut(duration: 0.1)) {
+                            isTrashHovered = hovering
+                        }
+                    }
+                    .transition(.opacity)
+                }
+            }
+            .frame(width: 24, height: 24)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(isHovered ? Color.secondary.opacity(0.1) : Color.clear)
+        )
+        .contentShape(Rectangle())
     }
 }
 
