@@ -1,10 +1,10 @@
-# Cortex
+# UniMemory
 
 A macOS menu bar application that captures and stores text you send from any application. Built with Swift and SwiftUI.
 
 ## Overview
 
-Cortex runs in your menu bar and uses macOS Accessibility APIs to detect text you type and send from any application—chat messages, AI prompts, emails, notes, code comments, and more. All captured text is stored locally in a SQLite database on your Mac.
+UniMemory runs in your menu bar and uses macOS Accessibility APIs to detect text you type and send from any application—chat messages, AI prompts, emails, notes, code comments, and more. All captured text is stored locally in a SQLite database on your Mac.
 
 **Version 1.0** focuses on reliable text capture. No AI, no cloud sync—just solid, local memory storage.
 
@@ -27,23 +27,23 @@ Cortex runs in your menu bar and uses macOS Accessibility APIs to detect text yo
 ### Building from Source
 
 1. Clone or download this repository
-2. Open `Cortex.xcodeproj` in Xcode
+2. Open `UniMemory.xcodeproj` in Xcode
 3. Select your development team in Signing & Capabilities
 4. Build and run (⌘R)
 
 ### First Launch
 
-When you first launch Cortex, you'll need to grant permissions:
+When you first launch UniMemory, you'll need to grant permissions:
 
 1. **Accessibility Permission** (Required)
-   - Cortex needs this to read text from any application
+   - UniMemory needs this to read text from any application
    - Go to: System Settings → Privacy & Security → Accessibility
-   - Find and enable Cortex
+   - Find and enable UniMemory
 
 2. **Input Monitoring Permission** (Optional but Recommended)
    - Enables detection of Enter key presses for better capture timing
    - Go to: System Settings → Privacy & Security → Input Monitoring
-   - Find and enable Cortex
+   - Find and enable UniMemory
 
 ## Usage
 
@@ -65,7 +65,7 @@ Click the brain icon in your menu bar to:
 
 ### How Capture Works
 
-Cortex detects "sent" text through several heuristics:
+UniMemory detects "sent" text through several heuristics:
 
 1. **Enter Key**: When you press Enter or Cmd+Enter (common send shortcuts)
 2. **Focus Lost**: When you finish editing and click elsewhere
@@ -76,8 +76,8 @@ The app continuously monitors the focused UI element and tracks changes to edita
 ## Architecture
 
 ```
-Cortex/
-├── CortexApp.swift          # App entry point & AppDelegate
+UniMemory/
+├── UniMemoryApp.swift          # App entry point & AppDelegate
 ├── Info.plist               # Permissions & menu bar config
 ├── Models/
 │   ├── Memory.swift         # Memory data model
@@ -117,7 +117,7 @@ Cortex/
 
 Memories are stored in SQLite at:
 ```
-~/Library/Application Support/Cortex/memories.db
+~/Library/Application Support/UniMemory/memories.db
 ```
 
 Schema:
