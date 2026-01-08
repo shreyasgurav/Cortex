@@ -103,34 +103,46 @@ final class HybridMemorySearch {
         
         print("[HybridSearch] 🔍 Searching: '\(trimmed.prefix(50))...'")
         
+        // Step 0: Strip intent phrases and extract core content
+        let coreQuery = stripIntentPhrases(trimmed)
+        let queryKeywords = extractKeywords(coreQuery)
+        
+        print("[HybridSearch] Core query: '\(coreQuery)', keywords: \(queryKeywords)")
+        
         // Step 1: Classify query
-        let queryClassification = classifier.classify(trimmed)
-        let queryTokens = SimHash.tokenOverlap(query: trimmed, content: "").description // Get tokens
+        let queryClassification = classifier.classify(coreQuery)
         
         print("[HybridSearch] Query sector: \(queryClassification.primary.rawValue)")
         
         // Step 2: Determine sectors to search
         let sectors = filters.sectors ?? MemorySector.allCases
         
-        // Step 3: Create query embedding
+        // Step 3: Create query embedding (use core query for better matching)
         let queryEmbedding: [Double]
         do {
-            let (vec, _) = try await embeddingService.embed(text: trimmed)
+            let (vec, _) = try await embeddingService.embed(text: coreQuery)
             queryEmbedding = vec
         } catch {
             print("[HybridSearch] Embedding failed, falling back to keyword search: \(error)")
-            return try await fallbackKeywordSearch(query: trimmed, limit: limit)
+            return try await fallbackKeywordSearch(query: coreQuery, keywords: queryKeywords, limit: limit)
         }
         
-        // Step 4: Vector search
+        // Step 4: Vector search with lower threshold
         let vectorResults = try await extractedStore.searchByEmbedding(
             queryEmbedding: queryEmbedding,
-            topK: limit * 3,  // Get more candidates for scoring
-            minScore: 0.3     // Lower threshold, we'll score properly later
+            topK: limit * 4,  // Get more candidates
+            minScore: 0.2     // Lower threshold to catch more
         )
         
         var candidateIds = Set(vectorResults.map { $0.id })
         print("[HybridSearch] Vector search found \(candidateIds.count) candidates")
+        
+        // Step 4b: Also do keyword search for each extracted keyword
+        let keywordMatches = try await keywordSearch(keywords: queryKeywords, limit: limit * 2)
+        for mem in keywordMatches {
+            candidateIds.insert(mem.id)
+        }
+        print("[HybridSearch] +\(keywordMatches.count) keyword matches, total: \(candidateIds.count)")
         
         // Step 5: Calculate average similarity for confidence check
         let allMemories = try await extractedStore.fetchAllMemories()
@@ -186,17 +198,17 @@ final class HybridMemorySearch {
             let waypointWeight = waypointEntry?.weight ?? 0
             let path = waypointEntry?.path ?? [memoryId]
             
-            // Calculate token overlap
-            let tokenOverlap = SimHash.tokenOverlap(query: trimmed, content: memory.content)
+            // Calculate token overlap using extracted keywords
+            let tokenOverlap = computeTokenOverlap(keywords: queryKeywords, content: memory.content)
             
             // Calculate keyword boost
-            let keywordBoost = computeKeywordBoost(query: trimmed, content: memory.content)
+            let keywordBoost = computeKeywordBoost(keywords: queryKeywords, content: memory.content, tags: memory.tags)
             
             // Calculate recency score
             let recencyScore = memory.recencyScore
             
             // Calculate tag match
-            let tagMatch = computeTagMatch(queryTokens: trimmed, tags: memory.tags)
+            let tagMatch = computeTagMatch(keywords: queryKeywords, tags: memory.tags)
             
             // Compute final hybrid score
             let finalScore = salienceManager.computeHybridScore(
@@ -244,10 +256,120 @@ final class HybridMemorySearch {
         return topResults
     }
     
+    // MARK: - Query Processing
+    
+    /// Strip intent phrases like "write a mail to", "help me with", etc.
+    private func stripIntentPhrases(_ text: String) -> String {
+        let intentPhrases = [
+            "write a mail to",
+            "send a mail to",
+            "write an email to",
+            "send an email to",
+            "write mail to",
+            "send mail to",
+            "tell me about",
+            "can you find",
+            "help me with",
+            "i need to",
+            "i want to",
+            "please help me",
+            "please",
+            "can you",
+            "could you",
+            "what do i know about",
+            "what is",
+            "who is",
+            "where is",
+            "remind me about",
+            "find information about",
+            "search for"
+        ]
+        
+        var result = text.lowercased()
+        for phrase in intentPhrases {
+            result = result.replacingOccurrences(of: phrase, with: " ")
+        }
+        
+        // Clean up extra spaces
+        result = result.components(separatedBy: .whitespaces)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    /// Extract important keywords from query (nouns, names, topics)
+    private func extractKeywords(_ text: String) -> [String] {
+        // Common stop words to filter out
+        let stopWords: Set<String> = [
+            "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+            "have", "has", "had", "do", "does", "did", "will", "would", "could",
+            "should", "may", "might", "must", "shall", "can", "need", "dare",
+            "ought", "used", "to", "of", "in", "for", "on", "with", "at", "by",
+            "from", "as", "into", "through", "during", "before", "after", "above",
+            "below", "between", "under", "again", "further", "then", "once", "here",
+            "there", "when", "where", "why", "how", "all", "each", "few", "more",
+            "most", "other", "some", "such", "no", "nor", "not", "only", "own",
+            "same", "so", "than", "too", "very", "just", "and", "but", "if", "or",
+            "because", "as", "until", "while", "about", "against", "between",
+            "into", "through", "during", "before", "after", "above", "below",
+            "this", "that", "these", "those", "i", "me", "my", "myself", "we",
+            "our", "ours", "ourselves", "you", "your", "yours", "yourself",
+            "yourselves", "he", "him", "his", "himself", "she", "her", "hers",
+            "herself", "it", "its", "itself", "they", "them", "their", "theirs",
+            "themselves", "what", "which", "who", "whom", "this", "that", "these",
+            "those", "am", "is", "are", "was", "were", "be", "been", "being"
+        ]
+        
+        let words = text.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { word in
+                word.count >= 2 &&
+                !stopWords.contains(word)
+            }
+        
+        // Return unique keywords, preserving order
+        var seen = Set<String>()
+        return words.filter { seen.insert($0).inserted }
+    }
+    
+    // MARK: - Keyword Search
+    
+    /// Search by individual keywords
+    private func keywordSearch(keywords: [String], limit: Int) async throws -> [ExtractedMemory] {
+        var results: [ExtractedMemory] = []
+        
+        for keyword in keywords.prefix(5) { // Limit to top 5 keywords
+            let matches = try await extractedStore.searchMemories(query: keyword)
+            for mem in matches.prefix(limit / 2) {
+                if !results.contains(where: { $0.id == mem.id }) {
+                    results.append(mem)
+                }
+            }
+        }
+        
+        return results
+    }
+    
     // MARK: - Fallback Search
     
-    private func fallbackKeywordSearch(query: String, limit: Int) async throws -> [HybridSearchResult] {
-        let results = try await extractedStore.searchMemories(query: query)
+    private func fallbackKeywordSearch(query: String, keywords: [String], limit: Int) async throws -> [HybridSearchResult] {
+        var results: [ExtractedMemory] = []
+        
+        // Search by full query
+        let fullQueryResults = try await extractedStore.searchMemories(query: query)
+        results.append(contentsOf: fullQueryResults)
+        
+        // Search by each keyword
+        for keyword in keywords.prefix(3) {
+            let keywordResults = try await extractedStore.searchMemories(query: keyword)
+            for mem in keywordResults {
+                if !results.contains(where: { $0.id == mem.id }) {
+                    results.append(mem)
+                }
+            }
+        }
+        
         return results.prefix(limit).map { memory in
             HybridSearchResult(
                 memory: memory,
@@ -259,29 +381,66 @@ final class HybridMemorySearch {
     
     // MARK: - Scoring Helpers
     
-    private func computeKeywordBoost(query: String, content: String) -> Double {
-        let queryWords = Set(query.lowercased().split(separator: " ").map { String($0) })
-        let contentWords = Set(content.lowercased().split(separator: " ").map { String($0) })
+    /// Compute token overlap between keywords and memory content
+    private func computeTokenOverlap(keywords: [String], content: String) -> Double {
+        guard !keywords.isEmpty else { return 0 }
         
-        let overlap = queryWords.intersection(contentWords).count
-        let boost = Double(overlap) / max(1, Double(queryWords.count))
+        let contentLower = content.lowercased()
+        var matchCount = 0
         
-        return boost * 0.15 // 15% max boost for keyword overlap
+        for keyword in keywords {
+            if contentLower.contains(keyword) {
+                matchCount += 1
+            }
+        }
+        
+        return Double(matchCount) / Double(keywords.count)
     }
     
-    private func computeTagMatch(queryTokens: String, tags: [String]) -> Double {
-        guard !tags.isEmpty else { return 0 }
+    /// Compute keyword boost (higher for more keyword matches)
+    private func computeKeywordBoost(keywords: [String], content: String, tags: [String]) -> Double {
+        guard !keywords.isEmpty else { return 0 }
         
-        let queryWords = Set(queryTokens.lowercased().split(separator: " ").map { String($0) })
+        let contentLower = content.lowercased()
+        let tagsLower = tags.map { $0.lowercased() }
+        var boost: Double = 0
+        
+        for keyword in keywords {
+            // Content match
+            if contentLower.contains(keyword) {
+                boost += 0.1
+            }
+            
+            // Exact tag match (higher value)
+            if tagsLower.contains(keyword) {
+                boost += 0.15
+            }
+            
+            // Partial tag match
+            for tag in tagsLower {
+                if tag.contains(keyword) || keyword.contains(tag) {
+                    boost += 0.05
+                }
+            }
+        }
+        
+        return min(0.3, boost) // Cap at 30% boost
+    }
+    
+    /// Compute tag match score
+    private func computeTagMatch(keywords: [String], tags: [String]) -> Double {
+        guard !tags.isEmpty, !keywords.isEmpty else { return 0 }
+        
+        let keywordSet = Set(keywords)
         var matches = 0
         
         for tag in tags {
             let tagLower = tag.lowercased()
-            if queryWords.contains(tagLower) {
+            if keywordSet.contains(tagLower) {
                 matches += 2 // Exact match
             } else {
-                for word in queryWords {
-                    if tagLower.contains(word) || word.contains(tagLower) {
+                for keyword in keywords {
+                    if tagLower.contains(keyword) || keyword.contains(tagLower) {
                         matches += 1 // Partial match
                     }
                 }
