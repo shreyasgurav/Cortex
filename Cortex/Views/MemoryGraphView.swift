@@ -2,8 +2,8 @@
 //  MemoryGraphView.swift
 //  Cortex
 //
-//  Interactive force-directed graph visualization of memory connections
-//  Memories are nodes, waypoints are edges linking similar memories
+//  Clean, stable memory graph visualization
+//  Follows Supermemory principles: calm, informational, minimal motion
 //
 
 import SwiftUI
@@ -19,26 +19,24 @@ struct GraphNode: Identifiable, Equatable {
     var position: CGPoint
     var velocity: CGPoint = .zero
     
-    // Color based on sector
     var color: Color {
         switch sector?.lowercased() {
-        case "semantic": return .blue
-        case "episodic": return .purple
-        case "procedural": return .green
-        case "emotional": return .pink
-        case "reflective": return .orange
-        default: return .gray
+        case "semantic": return Color(red: 0.36, green: 0.52, blue: 0.85)
+        case "episodic": return Color(red: 0.65, green: 0.45, blue: 0.78)
+        case "procedural": return Color(red: 0.42, green: 0.72, blue: 0.55)
+        case "emotional": return Color(red: 0.85, green: 0.52, blue: 0.60)
+        case "reflective": return Color(red: 0.90, green: 0.65, blue: 0.40)
+        default: return Color(red: 0.55, green: 0.55, blue: 0.60)
         }
     }
     
-    // Node size based on salience (importance)
+    // Reduced size variance: 10-20 range
     var radius: CGFloat {
-        CGFloat(12 + salience * 18) // 12-30 range
+        CGFloat(10 + salience * 10)
     }
     
-    // Preview text (first 40 chars)
     var preview: String {
-        content.count > 40 ? String(content.prefix(40)) + "..." : content
+        content.count > 50 ? String(content.prefix(50)) + "..." : content
     }
     
     static func == (lhs: GraphNode, rhs: GraphNode) -> Bool {
@@ -53,62 +51,85 @@ struct GraphEdge: Identifiable {
     let sourceId: String
     let targetId: String
     let weight: Double
-    
-    // Line width based on connection strength
-    var strokeWidth: CGFloat {
-        CGFloat(1 + weight * 3) // 1-4 range
-    }
-    
-    // Opacity based on weight
-    var opacity: Double {
-        0.2 + weight * 0.6 // 0.2-0.8 range
+}
+
+// MARK: - Sector Centers (for clustering)
+
+struct SectorLayout {
+    static func centerFor(sector: String?, in size: CGSize) -> CGPoint {
+        let cx = size.width / 2
+        let cy = size.height / 2
+        let radius = min(size.width, size.height) * 0.25
+        
+        switch sector?.lowercased() {
+        case "semantic":   return CGPoint(x: cx, y: cy - radius)
+        case "episodic":   return CGPoint(x: cx + radius * 0.95, y: cy - radius * 0.31)
+        case "procedural": return CGPoint(x: cx + radius * 0.59, y: cy + radius * 0.81)
+        case "emotional":  return CGPoint(x: cx - radius * 0.59, y: cy + radius * 0.81)
+        case "reflective": return CGPoint(x: cx - radius * 0.95, y: cy - radius * 0.31)
+        default:           return CGPoint(x: cx, y: cy)
+        }
     }
 }
 
-// MARK: - Force-Directed Graph Simulation
+// MARK: - Graph Simulation (Calmer Physics)
 
 @MainActor
 class GraphSimulation: ObservableObject {
     @Published var nodes: [GraphNode] = []
     @Published var edges: [GraphEdge] = []
-    @Published var selectedNode: GraphNode?
-    @Published var isSimulating: Bool = true
+    @Published var selectedNodeId: String?
+    @Published var isSimulating: Bool = false
     
     private var displayLink: Timer?
-    private let canvasSize: CGSize
+    private var canvasSize: CGSize = CGSize(width: 800, height: 600)
+    private var iterationCount = 0
+    private let maxIterations = 150
     
-    // Physics parameters
-    private let repulsionStrength: CGFloat = 5000
-    private let attractionStrength: CGFloat = 0.01
-    private let centerPull: CGFloat = 0.01
-    private let damping: CGFloat = 0.9
-    private let minDistance: CGFloat = 50
+    // Calmer physics parameters
+    private let repulsionStrength: CGFloat = 2500
+    private let attractionStrength: CGFloat = 0.03
+    private let sectorPull: CGFloat = 0.04
+    private let damping: CGFloat = 0.8
+    private let minDistance: CGFloat = 60
     
-    init(canvasSize: CGSize = CGSize(width: 800, height: 600)) {
-        self.canvasSize = canvasSize
+    var selectedNode: GraphNode? {
+        nodes.first { $0.id == selectedNodeId }
     }
     
-    func loadData(memories: [ExtractedMemory], waypoints: [Waypoint]) {
-        // Create nodes from memories
-        nodes = memories.map { memory in
-            GraphNode(
+    func loadData(memories: [ExtractedMemory], waypoints: [Waypoint], size: CGSize) {
+        self.canvasSize = size
+        
+        // CRITICAL: Only show top 25 by salience
+        let topMemories = memories
+            .sorted { $0.salience > $1.salience }
+            .prefix(25)
+        
+        let memoryIds = Set(topMemories.map { $0.id })
+        
+        // Create nodes with sector-based initial positions
+        nodes = topMemories.map { memory in
+            let sectorCenter = SectorLayout.centerFor(sector: memory.sector, in: size)
+            let jitter = CGPoint(
+                x: CGFloat.random(in: -40...40),
+                y: CGFloat.random(in: -40...40)
+            )
+            return GraphNode(
                 id: memory.id,
                 content: memory.content,
                 sector: memory.sector,
                 salience: memory.salience,
-                position: randomPosition()
+                position: CGPoint(x: sectorCenter.x + jitter.x, y: sectorCenter.y + jitter.y)
             )
         }
         
-        // Create edges from waypoints
+        // Only create edges between visible nodes
         edges = waypoints.compactMap { waypoint in
-            // Only create edge if both nodes exist
-            guard nodes.contains(where: { $0.id == waypoint.sourceId }),
-                  nodes.contains(where: { $0.id == waypoint.targetId }),
+            guard memoryIds.contains(waypoint.sourceId),
+                  memoryIds.contains(waypoint.targetId),
                   waypoint.sourceId != waypoint.targetId else {
                 return nil
             }
-            
             return GraphEdge(
                 id: waypoint.id,
                 sourceId: waypoint.sourceId,
@@ -117,18 +138,16 @@ class GraphSimulation: ObservableObject {
             )
         }
         
+        // Run simulation briefly then stop
+        iterationCount = 0
         startSimulation()
     }
     
-    private func randomPosition() -> CGPoint {
-        CGPoint(
-            x: CGFloat.random(in: 100...(canvasSize.width - 100)),
-            y: CGFloat.random(in: 100...(canvasSize.height - 100))
-        )
-    }
-    
     func startSimulation() {
+        guard !nodes.isEmpty else { return }
         isSimulating = true
+        iterationCount = 0
+        
         displayLink?.invalidate()
         displayLink = Timer.scheduledTimer(withTimeInterval: 1/60, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -146,14 +165,14 @@ class GraphSimulation: ObservableObject {
     private func step() {
         guard isSimulating, !nodes.isEmpty else { return }
         
-        var forces: [String: CGPoint] = [:]
+        iterationCount += 1
         
-        // Initialize forces
+        var forces: [String: CGPoint] = [:]
         for node in nodes {
             forces[node.id] = .zero
         }
         
-        // Repulsion between all nodes (Coulomb's law)
+        // Repulsion between nodes
         for i in 0..<nodes.count {
             for j in (i+1)..<nodes.count {
                 let nodeA = nodes[i]
@@ -174,7 +193,7 @@ class GraphSimulation: ObservableObject {
             }
         }
         
-        // Attraction along edges (Hooke's law)
+        // Attraction along edges
         for edge in edges {
             guard let sourceIdx = nodes.firstIndex(where: { $0.id == edge.sourceId }),
                   let targetIdx = nodes.firstIndex(where: { $0.id == edge.targetId }) else {
@@ -186,11 +205,11 @@ class GraphSimulation: ObservableObject {
             
             let dx = target.position.x - source.position.x
             let dy = target.position.y - source.position.y
-            let distance = sqrt(dx * dx + dy * dy)
+            let distance = max(sqrt(dx * dx + dy * dy), 1)
             
             let strength = attractionStrength * CGFloat(edge.weight) * distance
-            let fx = strength * dx / max(distance, 1)
-            let fy = strength * dy / max(distance, 1)
+            let fx = strength * dx / distance
+            let fy = strength * dy / distance
             
             forces[source.id]!.x += fx
             forces[source.id]!.y += fy
@@ -198,60 +217,56 @@ class GraphSimulation: ObservableObject {
             forces[target.id]!.y -= fy
         }
         
-        // Center pull (keep graph centered)
-        let centerX = canvasSize.width / 2
-        let centerY = canvasSize.height / 2
-        
+        // Pull toward sector centers
         for node in nodes {
-            let dx = centerX - node.position.x
-            let dy = centerY - node.position.y
-            forces[node.id]!.x += dx * centerPull
-            forces[node.id]!.y += dy * centerPull
+            let sectorCenter = SectorLayout.centerFor(sector: node.sector, in: canvasSize)
+            let dx = sectorCenter.x - node.position.x
+            let dy = sectorCenter.y - node.position.y
+            forces[node.id]!.x += dx * sectorPull
+            forces[node.id]!.y += dy * sectorPull
         }
         
-        // Apply forces and update positions
+        // Apply forces
         var maxVelocity: CGFloat = 0
         
         for i in 0..<nodes.count {
             guard let force = forces[nodes[i].id] else { continue }
             
-            // Update velocity
             nodes[i].velocity.x = (nodes[i].velocity.x + force.x) * damping
             nodes[i].velocity.y = (nodes[i].velocity.y + force.y) * damping
             
-            // Limit velocity
             let velocity = sqrt(nodes[i].velocity.x * nodes[i].velocity.x + nodes[i].velocity.y * nodes[i].velocity.y)
             maxVelocity = max(maxVelocity, velocity)
             
-            if velocity > 50 {
-                nodes[i].velocity.x = nodes[i].velocity.x / velocity * 50
-                nodes[i].velocity.y = nodes[i].velocity.y / velocity * 50
+            // Limit velocity
+            if velocity > 30 {
+                nodes[i].velocity.x = nodes[i].velocity.x / velocity * 30
+                nodes[i].velocity.y = nodes[i].velocity.y / velocity * 30
             }
             
-            // Update position
             nodes[i].position.x += nodes[i].velocity.x
             nodes[i].position.y += nodes[i].velocity.y
             
             // Keep within bounds
-            let margin: CGFloat = 30
+            let margin: CGFloat = 40
             nodes[i].position.x = max(margin, min(canvasSize.width - margin, nodes[i].position.x))
             nodes[i].position.y = max(margin, min(canvasSize.height - margin, nodes[i].position.y))
         }
         
-        // Stop simulation when settled
-        if maxVelocity < 0.5 {
+        // Stop early: velocity < 2 OR max iterations reached
+        if maxVelocity < 2 || iterationCount > maxIterations {
             stopSimulation()
         }
     }
     
-    func dragNode(_ nodeId: String, to position: CGPoint) {
+    func moveNode(_ nodeId: String, to position: CGPoint) {
         guard let index = nodes.firstIndex(where: { $0.id == nodeId }) else { return }
         nodes[index].position = position
         nodes[index].velocity = .zero
     }
     
     func selectNode(_ nodeId: String?) {
-        selectedNode = nodeId.flatMap { id in nodes.first(where: { $0.id == id }) }
+        selectedNodeId = nodeId
     }
 }
 
@@ -260,185 +275,26 @@ class GraphSimulation: ObservableObject {
 struct MemoryGraphView: View {
     @ObservedObject var appState: AppState
     @StateObject private var simulation = GraphSimulation()
+    @State private var hoveredNodeId: String?
     @State private var scale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
-    @State private var draggedNode: String?
-    @State private var hoveredNode: String?
+    @State private var isDraggingNode = false
+    @State private var optionKeyPressed = false
     
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 // Background
                 Color(nsColor: .textBackgroundColor)
-                
-                // Graph Canvas
-                Canvas { context, size in
-                    let transform = CGAffineTransform(translationX: offset.width, y: offset.height)
-                        .scaledBy(x: scale, y: scale)
-                    
-                    // Draw edges
-                    for edge in simulation.edges {
-                        guard let source = simulation.nodes.first(where: { $0.id == edge.sourceId }),
-                              let target = simulation.nodes.first(where: { $0.id == edge.targetId }) else {
-                            continue
-                        }
-                        
-                        let sourcePoint = source.position.applying(transform)
-                        let targetPoint = target.position.applying(transform)
-                        
-                        var path = Path()
-                        path.move(to: sourcePoint)
-                        path.addLine(to: targetPoint)
-                        
-                        let isHighlighted = hoveredNode == source.id || hoveredNode == target.id
-                        let edgeColor = isHighlighted ? Color.accentColor : Color.secondary
-                        
-                        context.stroke(
-                            path,
-                            with: .color(edgeColor.opacity(edge.opacity)),
-                            lineWidth: edge.strokeWidth * scale
-                        )
+                    .onTapGesture {
+                        simulation.selectNode(nil)
                     }
-                    
-                    // Draw nodes
-                    for node in simulation.nodes {
-                        let position = node.position.applying(transform)
-                        let radius = node.radius * scale
-                        
-                        let rect = CGRect(
-                            x: position.x - radius,
-                            y: position.y - radius,
-                            width: radius * 2,
-                            height: radius * 2
-                        )
-                        
-                        // Node background
-                        let isSelected = simulation.selectedNode?.id == node.id
-                        let isHovered = hoveredNode == node.id
-                        
-                        var nodeColor = node.color
-                        if isSelected {
-                            nodeColor = .accentColor
-                        } else if isHovered {
-                            nodeColor = node.color.opacity(0.8)
-                        }
-                        
-                        context.fill(
-                            Path(ellipseIn: rect),
-                            with: .color(nodeColor)
-                        )
-                        
-                        // Node border
-                        if isSelected || isHovered {
-                            context.stroke(
-                                Path(ellipseIn: rect),
-                                with: .color(.white),
-                                lineWidth: 2 * scale
-                            )
-                        }
-                    }
-                }
-                .gesture(
-                    MagnificationGesture()
-                        .onChanged { value in
-                            scale = max(0.3, min(3.0, value))
-                        }
-                )
-                .gesture(
-                    DragGesture()
-                        .onChanged { value in
-                            if draggedNode == nil {
-                                // Pan the view
-                                offset = CGSize(
-                                    width: offset.width + value.translation.width,
-                                    height: offset.height + value.translation.height
-                                )
-                            }
-                        }
-                )
                 
-                // Interactive node overlays
-                ForEach(simulation.nodes) { node in
-                    NodeOverlay(
-                        node: node,
-                        scale: scale,
-                        offset: offset,
-                        isHovered: hoveredNode == node.id,
-                        isSelected: simulation.selectedNode?.id == node.id,
-                        onHover: { isHovering in
-                            hoveredNode = isHovering ? node.id : nil
-                        },
-                        onTap: {
-                            simulation.selectNode(node.id)
-                        },
-                        onDrag: { newPosition in
-                            simulation.dragNode(node.id, to: newPosition)
-                        }
-                    )
-                }
-                
-                // Controls overlay
-                VStack {
-                    HStack {
-                        // Legend
-                        LegendView()
-                        
-                        Spacer()
-                        
-                        // Zoom controls
-                        HStack(spacing: 8) {
-                            Button(action: { scale = max(0.3, scale - 0.2) }) {
-                                Image(systemName: "minus.magnifyingglass")
-                            }
-                            .buttonStyle(.bordered)
-                            
-                            Text("\(Int(scale * 100))%")
-                                .font(.caption)
-                                .frame(width: 50)
-                            
-                            Button(action: { scale = min(3.0, scale + 0.2) }) {
-                                Image(systemName: "plus.magnifyingglass")
-                            }
-                            .buttonStyle(.bordered)
-                            
-                            Button(action: { resetView() }) {
-                                Image(systemName: "arrow.counterclockwise")
-                            }
-                            .buttonStyle(.bordered)
-                            .help("Reset View")
-                            
-                            Button(action: { simulation.startSimulation() }) {
-                                Image(systemName: simulation.isSimulating ? "pause.fill" : "play.fill")
-                            }
-                            .buttonStyle(.bordered)
-                            .help(simulation.isSimulating ? "Pause" : "Simulate")
-                        }
-                    }
-                    .padding()
-                    
-                    Spacer()
-                    
-                    // Selected node info
-                    if let selectedNode = simulation.selectedNode {
-                        SelectedNodeInfoView(node: selectedNode, onClose: {
-                            simulation.selectNode(nil)
-                        })
-                        .padding()
-                    }
-                }
-                
-                // Empty state
                 if simulation.nodes.isEmpty {
-                    VStack(spacing: 16) {
-                        Image(systemName: "circle.grid.cross")
-                            .font(.system(size: 50))
-                            .foregroundColor(.secondary.opacity(0.3))
-                        Text("No memories to visualize")
-                            .foregroundColor(.secondary)
-                        Text("Memories will appear here as connected nodes")
-                            .font(.caption)
-                            .foregroundColor(.secondary.opacity(0.7))
-                    }
+                    emptyState
+                } else {
+                    graphContent(size: geometry.size)
+                    controlsOverlay
                 }
             }
             .onAppear {
@@ -450,172 +306,326 @@ struct MemoryGraphView: View {
         }
     }
     
+    // MARK: - Graph Content
+    
+    @ViewBuilder
+    private func graphContent(size: CGSize) -> some View {
+        // Canvas for edges and nodes
+        Canvas { context, canvasSize in
+            let transform = CGAffineTransform(translationX: offset.width, y: offset.height)
+                .scaledBy(x: scale, y: scale)
+            
+            // Draw edges (very faint by default)
+            for edge in simulation.edges {
+                guard let source = simulation.nodes.first(where: { $0.id == edge.sourceId }),
+                      let target = simulation.nodes.first(where: { $0.id == edge.targetId }) else {
+                    continue
+                }
+                
+                let sourcePoint = source.position.applying(transform)
+                let targetPoint = target.position.applying(transform)
+                
+                var path = Path()
+                path.move(to: sourcePoint)
+                path.addLine(to: targetPoint)
+                
+                // Edges only visible when hovering/selecting connected nodes
+                let isHighlighted = hoveredNodeId == source.id || hoveredNodeId == target.id ||
+                                   simulation.selectedNodeId == source.id || simulation.selectedNodeId == target.id
+                
+                let opacity = isHighlighted ? 0.5 : 0.08
+                
+                context.stroke(
+                    path,
+                    with: .color(Color.secondary.opacity(opacity)),
+                    lineWidth: 1.5
+                )
+            }
+            
+            // Draw nodes
+            for node in simulation.nodes {
+                let position = node.position.applying(transform)
+                let radius = node.radius * scale
+                
+                let rect = CGRect(
+                    x: position.x - radius,
+                    y: position.y - radius,
+                    width: radius * 2,
+                    height: radius * 2
+                )
+                
+                let isSelected = simulation.selectedNodeId == node.id
+                let isHovered = hoveredNodeId == node.id
+                
+                // Node fill
+                context.fill(
+                    Path(ellipseIn: rect),
+                    with: .color(node.color.opacity(isSelected ? 1.0 : 0.85))
+                )
+                
+                // Selection ring
+                if isSelected {
+                    context.stroke(
+                        Path(ellipseIn: rect.insetBy(dx: -3, dy: -3)),
+                        with: .color(.white),
+                        lineWidth: 2
+                    )
+                } else if isHovered {
+                    context.stroke(
+                        Path(ellipseIn: rect.insetBy(dx: -2, dy: -2)),
+                        with: .color(.white.opacity(0.6)),
+                        lineWidth: 1.5
+                    )
+                }
+            }
+        }
+        .gesture(panGesture)
+        .gesture(zoomGesture)
+        
+        // Invisible hit targets for nodes
+        ForEach(simulation.nodes) { node in
+            nodeHitTarget(for: node)
+        }
+        
+        // Selected node detail panel
+        if let selected = simulation.selectedNode {
+            selectedNodePanel(node: selected)
+        }
+    }
+    
+    // MARK: - Node Hit Target
+    
+    @ViewBuilder
+    private func nodeHitTarget(for node: GraphNode) -> some View {
+        let position = CGPoint(
+            x: node.position.x * scale + offset.width,
+            y: node.position.y * scale + offset.height
+        )
+        let hitSize = max(node.radius * scale * 2, 30)
+        
+        Circle()
+            .fill(Color.clear)
+            .frame(width: hitSize, height: hitSize)
+            .position(position)
+            .contentShape(Circle())
+            .onHover { isHovering in
+                hoveredNodeId = isHovering ? node.id : nil
+            }
+            .onTapGesture {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    simulation.selectNode(simulation.selectedNodeId == node.id ? nil : node.id)
+                }
+            }
+            .gesture(nodeDragGesture(for: node))
+    }
+    
+    // MARK: - Gestures
+    
+    private var panGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard !isDraggingNode else { return }
+                offset = CGSize(
+                    width: offset.width + value.translation.width * 0.3,
+                    height: offset.height + value.translation.height * 0.3
+                )
+            }
+    }
+    
+    private var zoomGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                scale = max(0.5, min(2.0, value))
+            }
+    }
+    
+    private func nodeDragGesture(for node: GraphNode) -> some Gesture {
+        DragGesture()
+            .onChanged { value in
+                isDraggingNode = true
+                let newPosition = CGPoint(
+                    x: (value.location.x - offset.width) / scale,
+                    y: (value.location.y - offset.height) / scale
+                )
+                simulation.moveNode(node.id, to: newPosition)
+            }
+            .onEnded { _ in
+                isDraggingNode = false
+            }
+    }
+    
+    // MARK: - Selected Node Panel
+    
+    @ViewBuilder
+    private func selectedNodePanel(node: GraphNode) -> some View {
+        VStack {
+            Spacer()
+            
+            HStack(alignment: .top, spacing: 12) {
+                Circle()
+                    .fill(node.color)
+                    .frame(width: 14, height: 14)
+                    .padding(.top, 3)
+                
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(node.content)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.primary)
+                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                    
+                    HStack(spacing: 16) {
+                        if let sector = node.sector {
+                            Label(sector.capitalized, systemImage: "tag.fill")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Label("\(Int(node.salience * 100))%", systemImage: "star.fill")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+                
+                Button {
+                    withAnimation { simulation.selectNode(nil) }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(Color.secondary.opacity(0.1))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(16)
+            .frame(maxWidth: 380)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                    .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
+            )
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
+        }
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+    
+    // MARK: - Controls Overlay
+    
+    private var controlsOverlay: some View {
+        VStack {
+            HStack(alignment: .top) {
+                // Legend
+                legendView
+                
+                Spacer()
+                
+                // Stats & controls
+                HStack(spacing: 12) {
+                    Text("\(simulation.nodes.count) nodes")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Divider().frame(height: 12)
+                    
+                    Button {
+                        withAnimation { resetView() }
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Reset view")
+                }
+                .padding(8)
+                .background(Color(nsColor: .windowBackgroundColor).opacity(0.9))
+                .cornerRadius(8)
+            }
+            .padding(16)
+            
+            Spacer()
+        }
+    }
+    
+    // MARK: - Legend
+    
+    private var legendView: some View {
+        HStack(spacing: 10) {
+            ForEach(sectorColors, id: \.0) { sector, color in
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(color)
+                        .frame(width: 8, height: 8)
+                    Text(sector)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .windowBackgroundColor).opacity(0.9))
+        .cornerRadius(6)
+    }
+    
+    private var sectorColors: [(String, Color)] {
+        [
+            ("Semantic", Color(red: 0.36, green: 0.52, blue: 0.85)),
+            ("Episodic", Color(red: 0.65, green: 0.45, blue: 0.78)),
+            ("Procedural", Color(red: 0.42, green: 0.72, blue: 0.55)),
+            ("Emotional", Color(red: 0.85, green: 0.52, blue: 0.60)),
+            ("Reflective", Color(red: 0.90, green: 0.65, blue: 0.40))
+        ]
+    }
+    
+    // MARK: - Empty State
+    
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "circle.grid.cross")
+                .font(.system(size: 36))
+                .foregroundColor(.secondary.opacity(0.3))
+            Text("No memories yet")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.secondary)
+            Text("Your memory graph will appear here")
+                .font(.caption)
+                .foregroundColor(.secondary.opacity(0.7))
+        }
+    }
+    
+    // MARK: - Helpers
+    
     private func loadGraphData(size: CGSize) {
         Task {
-            // Load waypoints from store
             let waypoints = await loadWaypoints()
-            
-            // Update simulation canvas size
-            let simulation = GraphSimulation(canvasSize: size)
-            simulation.loadData(memories: appState.extractedMemories, waypoints: waypoints)
-            
             await MainActor.run {
-                self.simulation.nodes = simulation.nodes
-                self.simulation.edges = simulation.edges
-                self.simulation.startSimulation()
+                simulation.loadData(
+                    memories: appState.extractedMemories,
+                    waypoints: waypoints,
+                    size: size
+                )
             }
         }
     }
     
     private func loadWaypoints() async -> [Waypoint] {
-        // Try to load from store
         do {
             let store = try ExtractedMemoryStore()
             return try await store.fetchAllWaypoints()
         } catch {
-            print("[MemoryGraph] Failed to load waypoints: \(error)")
             return []
         }
     }
     
     private func resetView() {
-        withAnimation {
-            scale = 1.0
-            offset = .zero
-        }
+        scale = 1.0
+        offset = .zero
         simulation.startSimulation()
     }
 }
-
-// MARK: - Node Overlay (for interaction)
-
-struct NodeOverlay: View {
-    let node: GraphNode
-    let scale: CGFloat
-    let offset: CGSize
-    let isHovered: Bool
-    let isSelected: Bool
-    let onHover: (Bool) -> Void
-    let onTap: () -> Void
-    let onDrag: (CGPoint) -> Void
-    
-    var body: some View {
-        let position = CGPoint(
-            x: node.position.x * scale + offset.width,
-            y: node.position.y * scale + offset.height
-        )
-        let radius = node.radius * scale
-        
-        Circle()
-            .fill(Color.clear)
-            .frame(width: radius * 2, height: radius * 2)
-            .position(position)
-            .onHover { onHover($0) }
-            .onTapGesture { onTap() }
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        let newPosition = CGPoint(
-                            x: (value.location.x - offset.width) / scale,
-                            y: (value.location.y - offset.height) / scale
-                        )
-                        onDrag(newPosition)
-                    }
-            )
-            .overlay(
-                // Tooltip on hover
-                Group {
-                    if isHovered && !isSelected {
-                        Text(node.preview)
-                            .font(.caption)
-                            .padding(6)
-                            .background(Color(nsColor: .windowBackgroundColor))
-                            .cornerRadius(6)
-                            .shadow(radius: 2)
-                            .offset(y: -radius - 20)
-                    }
-                }
-                .position(position)
-            )
-    }
-}
-
-// MARK: - Legend View
-
-struct LegendView: View {
-    var body: some View {
-        HStack(spacing: 12) {
-            ForEach(sectorItems, id: \.0) { item in
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(item.1)
-                        .frame(width: 10, height: 10)
-                    Text(item.0)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-        }
-        .padding(8)
-        .background(Color(nsColor: .windowBackgroundColor).opacity(0.9))
-        .cornerRadius(8)
-    }
-    
-    private var sectorItems: [(String, Color)] {
-        [
-            ("Semantic", .blue),
-            ("Episodic", .purple),
-            ("Procedural", .green),
-            ("Emotional", .pink),
-            ("Reflective", .orange)
-        ]
-    }
-}
-
-// MARK: - Selected Node Info View
-
-struct SelectedNodeInfoView: View {
-    let node: GraphNode
-    let onClose: () -> Void
-    
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Circle()
-                .fill(node.color)
-                .frame(width: 20, height: 20)
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(node.content)
-                    .font(.system(size: 13))
-                    .lineLimit(3)
-                
-                HStack(spacing: 12) {
-                    if let sector = node.sector {
-                        Label(sector.capitalized, systemImage: "tag")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    Label(String(format: "%.0f%% importance", node.salience * 100), systemImage: "star")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            Spacer()
-            
-            Button(action: onClose) {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundColor(.secondary)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding()
-        .frame(maxWidth: 400)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .cornerRadius(12)
-        .shadow(radius: 4)
-    }
-}
-
-
