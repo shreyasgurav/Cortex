@@ -1,61 +1,236 @@
 //
-//  Memory.swift
+//  ExtractedMemory.swift
 //  Cortex
 //
-//  Core data model for captured memories
+//  Structured memory extracted from raw captures using AI
+//  This is what Supermemory calls "memories" - facts, insights, preferences
 //
 
 import Foundation
 
-/// Represents a captured memory entry
-/// Each memory is a snapshot of text that the user "sent" or finalized from any application
-struct Memory: Identifiable, Hashable {
+/// A structured memory extracted from raw captured text
+/// Unlike the raw Memory (which stores what user typed), this stores
+/// meaningful facts and insights extracted by AI
+struct ExtractedMemory: Identifiable, Codable, Hashable {
     let id: String
     let createdAt: Date
-    let appBundleId: String
-    let appName: String
-    let windowTitle: String
-    let source: CaptureSource
-    let text: String
-    let textHash: String
     
-    /// Preview text for list display (first line, truncated)
-    var preview: String {
-        let firstLine = text.components(separatedBy: .newlines).first ?? text
-        if firstLine.count > 100 {
-            return String(firstLine.prefix(100)) + "..."
-        }
-        return firstLine
+    /// The extracted fact/insight/preference
+    var content: String
+    
+    /// Type of memory
+    var type: MemoryType
+    
+    /// Confidence score (0.0 - 1.0)
+    var confidence: Double
+    
+    /// Tags for categorization
+    var tags: [String]
+    
+    /// Source raw memory ID (links back to the original capture)
+    let sourceMemoryId: String
+    
+    /// Source app where this was captured from
+    let sourceApp: String
+    
+    /// Whether this memory is still relevant (can be "forgotten")
+    var isActive: Bool
+    
+    /// Optional expiry date (some memories are time-sensitive)
+    var expiresAt: Date?
+    
+    /// Relationships to other memories
+    var relatedMemoryIds: [String]
+    
+    /// Optional embedding vector for semantic search
+    let embedding: [Double]?
+    
+    /// Model used to generate embedding
+    let embeddingModel: String?
+    
+    // MARK: - OpenMemory-style Fields
+    
+    /// SimHash for fuzzy duplicate detection
+    var simhash: String?
+    
+    /// Memory sector (semantic, episodic, procedural, emotional, reflective)
+    var sector: String?
+    
+    /// Importance score with decay (0.0 - 1.0)
+    var salience: Double
+    
+    /// When this memory was last accessed/retrieved
+    var lastSeenAt: Date?
+    
+    /// Decay rate (sector-specific)
+    var decayLambda: Double
+    
+    /// Segment number for memory organization
+    var segment: Int
+    
+    // MARK: - Computed Properties
+    
+    /// Convenience: does this memory have an embedding
+    var hasEmbedding: Bool {
+        embedding != nil && !(embedding?.isEmpty ?? true)
     }
     
-    /// Formatted timestamp for display
+    /// Get the memory sector (parsed from string)
+    var memorySector: MemorySector {
+        if let sector = sector, let s = MemorySector(rawValue: sector) {
+            return s
+        }
+        return type.sector
+    }
+    
+    /// Calculate current salience with decay applied
+    var currentSalience: Double {
+        guard let lastSeen = lastSeenAt else { return salience }
+        return SalienceManager.shared.calculateDecayedSalience(
+            sector: memorySector,
+            initialSalience: salience,
+            lastSeenAt: lastSeen
+        )
+    }
+    
+    /// Calculate recency score for ranking
+    var recencyScore: Double {
+        let seenAt = lastSeenAt ?? createdAt
+        return SalienceManager.shared.calculateRecencyScore(lastSeenAt: seenAt)
+    }
+    
+    // MARK: - Initializers
+    
+    /// Full initializer with all OpenMemory fields
+    init(
+        id: String,
+        createdAt: Date,
+        content: String,
+        type: MemoryType,
+        confidence: Double,
+        tags: [String],
+        sourceMemoryId: String,
+        sourceApp: String,
+        isActive: Bool,
+        expiresAt: Date? = nil,
+        relatedMemoryIds: [String],
+        embedding: [Double]? = nil,
+        embeddingModel: String? = nil,
+        simhash: String? = nil,
+        sector: String? = nil,
+        salience: Double = 0.5,
+        lastSeenAt: Date? = nil,
+        decayLambda: Double = 0.02,
+        segment: Int = 0
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.content = content
+        self.type = type
+        self.confidence = confidence
+        self.tags = tags
+        self.sourceMemoryId = sourceMemoryId
+        self.sourceApp = sourceApp
+        self.isActive = isActive
+        self.expiresAt = expiresAt
+        self.relatedMemoryIds = relatedMemoryIds
+        self.embedding = embedding
+        self.embeddingModel = embeddingModel
+        self.simhash = simhash
+        self.sector = sector
+        self.salience = salience
+        self.lastSeenAt = lastSeenAt
+        self.decayLambda = decayLambda
+        self.segment = segment
+    }
+    
+    // MARK: - Display Helpers
+    
+    var preview: String {
+        if content.count > 100 {
+            return String(content.prefix(100)) + "..."
+        }
+        return content
+    }
+    
     var formattedDate: String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: createdAt, relativeTo: Date())
     }
     
-    /// Full formatted timestamp
-    var fullFormattedDate: String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter.string(from: createdAt)
+    var typeIcon: String {
+        type.icon
     }
 }
 
-/// Source of capture - how we detected the "send" action
-enum CaptureSource: String, Codable {
-    case enterKey = "enter_key"        // User pressed Enter or Cmd+Enter
-    case focusLost = "focus_lost"      // Focus moved away from editable field
-    case appSwitch = "app_switch"      // User switched to another application
+/// Types of memories that can be extracted
+enum MemoryType: String, Codable, CaseIterable {
+    case fact = "fact"                      // "User's name is John"
+    case preference = "preference"          // "User prefers dark mode"
+    case belief = "belief"                  // "User believes AI will change everything"
+    case goal = "goal"                      // "User wants to learn Swift"
+    case relationship = "relationship"      // "User works with Sarah on Project X"
+    case event = "event"                    // "User has a meeting tomorrow at 3pm"
+    case skill = "skill"                    // "User knows Python and Swift"
+    case project = "project"                // "User is building an app called Cortex"
+    case insight = "insight"                // General insight about user
+    case question = "question"              // Questions user frequently asks
+    case instruction = "instruction"        // How user wants things done
     
     var displayName: String {
         switch self {
-        case .enterKey: return "Enter Key"
-        case .focusLost: return "Focus Lost"
-        case .appSwitch: return "App Switch"
+        case .fact: return "Fact"
+        case .preference: return "Preference"
+        case .belief: return "Belief"
+        case .goal: return "Goal"
+        case .relationship: return "Relationship"
+        case .event: return "Event"
+        case .skill: return "Skill"
+        case .project: return "Project"
+        case .insight: return "Insight"
+        case .question: return "Question"
+        case .instruction: return "Instruction"
         }
     }
+    
+    var icon: String {
+        switch self {
+        case .fact: return "info.circle"
+        case .preference: return "heart"
+        case .belief: return "brain.head.profile"
+        case .goal: return "target"
+        case .relationship: return "person.2"
+        case .event: return "calendar"
+        case .skill: return "hammer"
+        case .project: return "folder"
+        case .insight: return "lightbulb"
+        case .question: return "questionmark.circle"
+        case .instruction: return "list.bullet"
+        }
+    }
+}
+
+/// Result of memory worthiness check
+struct MemoryWorthinessResult: Codable {
+    let isWorthRemembering: Bool
+    let reason: String
+    let suggestedTypes: [MemoryType]
+}
+
+/// Result of memory extraction
+struct MemoryExtractionResult: Codable {
+    let memories: [ExtractedMemoryData]
+    let wasProcessed: Bool
+    let processingNote: String?
+}
+
+/// Data structure for extracted memory (before creating ExtractedMemory)
+struct ExtractedMemoryData: Codable {
+    let content: String
+    let type: MemoryType
+    let confidence: Double
+    let tags: [String]
+    let expiresAt: Date?
 }
 
