@@ -42,7 +42,10 @@ struct ScoredMemory {
 actor MemorySearchService {
 
     private let embeddingService: EmbeddingService
-    private let extractedStore: ExtractedMemoryStore
+    
+    /// Exposed for hybrid search creation
+    let extractedStore: ExtractedMemoryStore
+    
     private let llmService: LLMService
 
     init(
@@ -53,6 +56,14 @@ actor MemorySearchService {
         self.embeddingService = embeddingService
         self.extractedStore = extractedStore
         self.llmService = llmService
+    }
+    
+    /// Create a hybrid search instance for OpenMemory-style retrieval
+    @MainActor func createHybridSearch() -> HybridMemorySearch {
+        return HybridMemorySearch(
+            embeddingService: EmbeddingService(),
+            extractedStore: extractedStore
+        )
     }
 
     // MARK: - Public API

@@ -2,7 +2,13 @@
 //  MemoryOverlayManager.swift
 //  Cortex
 //
-//  Manages the floating \"memory\" button overlay and search+insert flow.
+//  Manages the floating "memory" button overlay and search+insert flow.
+//
+//  NOW: Uses OpenMemory-style hybrid search with:
+//  - Sector-aware scoring
+//  - Waypoint expansion
+//  - Salience decay
+//  - Retrieval reinforcement
 //
 
 import Foundation
@@ -38,6 +44,9 @@ final class MemoryOverlayManager: ObservableObject {
     private let searchService: MemorySearchService
     private let insertService: MemoryInsertService
     
+    // NEW: Hybrid search for OpenMemory-style retrieval
+    private var hybridSearch: HybridMemorySearch?
+    
     private var window: NSWindow?
     private var isVisible: Bool = false
     
@@ -47,6 +56,9 @@ final class MemoryOverlayManager: ObservableObject {
         self.contextDetector = contextDetector
         self.searchService = searchService
         self.insertService = insertService
+        
+        // Initialize hybrid search (uses same store as searchService)
+        self.hybridSearch = searchService.createHybridSearch()
     }
     
     /// Show or update the overlay near the current context, if any.
@@ -235,14 +247,10 @@ final class MemoryOverlayManager: ObservableObject {
 
     
     /// Triggered by updateOverlayVisibility when text is present
+    /// NOW: Uses OpenMemory-style hybrid search
     private func triggerBackgroundSearch(for text: String) {
         // Cancel existing task to debounce
         searchTask?.cancel()
-        
-        // Use a slight delay before showing loading state to avoid flickering? 
-        // Or strictly strictly follow user: "Wait 700-1000ms... Only show if cachedMemories.count > 0"
-        // Actually user said: "Wait 700-1000ms after last keystroke... Only show if cachedMemories.count > 0"
-        // But also said: State 1 - Idle/Scanning... meaning "Checking memory..."
         
         searchTask = Task { @MainActor in
             // Debounce: wait 400ms for user to stop typing (reduce noise)
@@ -252,16 +260,35 @@ final class MemoryOverlayManager: ObservableObject {
                 return
             }
             
-            print("[MemoryOverlay] Debounce finished, setting .loading")
+            print("[MemoryOverlay] Debounce finished, starting hybrid search")
             self.overlayState = .loading
             
             do {
-                // Search for related memories
-                let memories = try await searchService.searchRelatedMemories(for: text, topK: 5)
+                // NEW: Use hybrid search (OpenMemory-style)
+                let memories: [ExtractedMemory]
+                
+                if let hybridSearch = self.hybridSearch {
+                    // Use new hybrid search with sector-aware scoring
+                    let results = try await hybridSearch.search(
+                        query: text,
+                        limit: 5,
+                        filters: SearchFilters(debug: false)
+                    )
+                    memories = results.map { $0.memory }
+                    
+                    // Log top result for debugging
+                    if let top = results.first {
+                        print("[MemoryOverlay] Top result (score \(String(format: "%.3f", top.score))): \(top.memory.content.prefix(50))...")
+                    }
+                } else {
+                    // Fallback to old search service
+                    memories = try await searchService.searchRelatedMemories(for: text, topK: 5)
+                }
+                
                 if Task.isCancelled { return }
                 
                 self.cachedMemories = memories
-                print("[MemoryOverlay] Background search found \(memories.count) related memories")
+                print("[MemoryOverlay] Hybrid search found \(memories.count) related memories")
                 
                 // Show count even if 0, to be explicit
                 self.overlayState = .available(count: memories.count)
@@ -273,17 +300,14 @@ final class MemoryOverlayManager: ObservableObject {
                 }
                 
                 // Ensure window is visible
-                // Note: We removed the .empty logic, so we don't hide it anymore.
                 if self.isVisible {
                     self.window?.orderFrontRegardless()
                 }
             } catch {
                 if !Task.isCancelled {
-                    print("[MemoryOverlay] Background search failed: \(error)")
+                    print("[MemoryOverlay] Hybrid search failed: \(error)")
                     self.cachedMemories = []
-                    // Show error state? Or just 0?
                     self.overlayState = .available(count: 0)
-                    // Auto-hide on error too
                     self.scheduleAutoHide()
                 }
             }

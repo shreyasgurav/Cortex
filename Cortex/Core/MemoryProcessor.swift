@@ -3,9 +3,15 @@
 //  Cortex
 //
 //  AI-powered service that processes raw captures and extracts meaningful memories
-//  Two-stage process:
-//    1. Filter: Is this worth remembering?
-//    2. Extract: What facts/insights can we extract?
+//  
+//  NEW: OpenMemory-style processing with two paths:
+//    1. Fast path: Regex classification + sentence scoring (no LLM, instant)
+//    2. LLM path: Full AI extraction for complex cases
+//
+//  Features:
+//    - SimHash deduplication (fuzzy matching)
+//    - Salience with decay
+//    - Waypoint creation (memory linking)
 //
 
 import Foundation
@@ -22,6 +28,9 @@ final class MemoryProcessor: ObservableObject {
     @Published private(set) var lastError: String?
     @Published var isEnabled: Bool = false
     
+    /// Use fast (regex-based) extraction instead of LLM
+    @Published var useFastExtraction: Bool = true
+    
     // MARK: - Dependencies
     
     private var llmService: LLMService
@@ -29,10 +38,21 @@ final class MemoryProcessor: ObservableObject {
     internal var extractedMemoryStore: ExtractedMemoryStore?  // Internal so CaptureCoordinator can access
     private var embeddingService: EmbeddingService
     
+    // MARK: - OpenMemory-style components
+    
+    private let classifier = SectorClassifier.shared
+    private let essenceExtractor = EssenceExtractor.shared
+    private let salienceManager = SalienceManager.shared
+    private let waypointManager = WaypointManager()
+    
     // MARK: - Queue for processing
     
     private var processingQueue: [Memory] = []
     private var isProcessingQueue: Bool = false
+    
+    /// Current segment for memory organization
+    private var currentSegment: Int = 0
+    private let segmentSize: Int = 100 // Memories per segment
     
     // MARK: - Initialization
     
@@ -149,6 +169,7 @@ final class MemoryProcessor: ObservableObject {
     }
     
     /// Save extracted memories directly with embeddings (used for AI-first filtering)
+    /// NOW: Uses OpenMemory-style SimHash deduplication, salience, and waypoints
     func saveExtractedMemories(_ memoriesData: [ExtractedMemoryData], sourceMemory: Memory) async throws {
         guard let store = extractedMemoryStore else {
             print("[MemoryProcessor] No extracted memory store available")
@@ -158,15 +179,26 @@ final class MemoryProcessor: ObservableObject {
         var enriched: [(memory: ExtractedMemory, embedding: [Double]?, embeddingModel: String?)] = []
         
         for data in memoriesData {
-            // Check for duplicates before generating embeddings
+            // OpenMemory-style: SimHash deduplication (fuzzy matching)
+            let simhash = SimHash.compute(data.content)
+            
+            if let existing = try? await store.findNearDuplicates(data.content) {
+                // Near-duplicate found - boost salience instead of creating new
+                print("[MemoryProcessor] 🔁 Near-duplicate found, boosting salience: \(data.content.prefix(40))...")
+                try? await store.boostSalience(memoryId: existing.id, boost: 0.15)
+                continue
+            }
+            
+            // Check exact content match as fallback
             do {
                 if try await store.hasMemory(withContent: data.content) {
-                    print("[MemoryProcessor] Skipping duplicate memory: \(data.content.prefix(50))...")
+                    print("[MemoryProcessor] Skipping exact duplicate: \(data.content.prefix(50))...")
                     continue
                 }
             } catch {
                 print("[MemoryProcessor] Failed to check for duplicate: \(error)")
             }
+            
             // Generate embedding
             let embeddingResult: ([Double]?, String?)
             if isEnabled {
@@ -182,6 +214,12 @@ final class MemoryProcessor: ObservableObject {
                 embeddingResult = (nil, nil)
             }
             
+            // Classify into sector
+            let classification = classifier.classify(data.content)
+            
+            // Calculate initial salience based on classification
+            let initialSalience = salienceManager.calculateInitialSalience(classification: classification)
+            
             let mem = ExtractedMemory(
                 id: UUID().uuidString,
                 createdAt: Date(),
@@ -195,9 +233,21 @@ final class MemoryProcessor: ObservableObject {
                 expiresAt: data.expiresAt,
                 relatedMemoryIds: [],
                 embedding: embeddingResult.0,
-                embeddingModel: embeddingResult.1
+                embeddingModel: embeddingResult.1,
+                // OpenMemory-style fields
+                simhash: simhash,
+                sector: classification.primary.rawValue,
+                salience: initialSalience,
+                lastSeenAt: Date(),
+                decayLambda: classification.primary.decayLambda,
+                segment: currentSegment
             )
             enriched.append((mem, embeddingResult.0, embeddingResult.1))
+            
+            // Create waypoint to most similar existing memory
+            if let embedding = embeddingResult.0 {
+                await createWaypointForNewMemory(memoryId: mem.id, embedding: embedding, store: store)
+            }
         }
         
         try await store.saveMemories(enriched)
@@ -208,7 +258,117 @@ final class MemoryProcessor: ObservableObject {
             extractedCount: enriched.count
         )
         
-        print("[MemoryProcessor] ✓ Saved \(enriched.count) extracted memories with embeddings")
+        // Update segment if needed
+        await updateSegmentIfNeeded(store: store)
+        
+        print("[MemoryProcessor] ✓ Saved \(enriched.count) extracted memories with OpenMemory features")
+    }
+    
+    // MARK: - Fast Extraction (OpenMemory-style, no LLM)
+    
+    /// Process memory using fast regex-based extraction (no LLM needed)
+    /// Returns extracted memories without making any API calls
+    func processMemoryFast(_ memory: Memory) async -> MemoryExtractionResult {
+        let text = memory.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Quick worthiness check (no LLM)
+        let (worth, reason) = classifier.isWorthRemembering(text)
+        
+        guard worth else {
+            return MemoryExtractionResult(
+                memories: [],
+                wasProcessed: false,
+                processingNote: reason
+            )
+        }
+        
+        // Extract atomic memories using sentence scoring
+        let extracted = essenceExtractor.extractAtomicMemories(text)
+        
+        guard !extracted.isEmpty else {
+            // Fallback: use whole text as single memory
+            let classification = classifier.classify(text)
+            let fallback = ExtractedMemoryData(
+                content: EssenceExtractor.shared.extractEssence(text, sector: classification.primary),
+                type: classification.primary.toMemoryType(),
+                confidence: classification.confidence,
+                tags: [],
+                expiresAt: nil
+            )
+            return MemoryExtractionResult(
+                memories: [fallback],
+                wasProcessed: true,
+                processingNote: "Fast extraction (fallback)"
+            )
+        }
+        
+        // Convert to ExtractedMemoryData
+        let memories = extracted.map { $0.toExtractedMemoryData() }
+        
+        return MemoryExtractionResult(
+            memories: memories,
+            wasProcessed: true,
+            processingNote: "Fast extraction (regex + scoring)"
+        )
+    }
+    
+    /// Quick worthiness check without LLM
+    func checkWorthinessFast(_ memory: Memory) -> MemoryWorthinessResult {
+        let text = memory.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let (worth, reason) = classifier.isWorthRemembering(text)
+        
+        if worth {
+            let classification = classifier.classify(text)
+            return MemoryWorthinessResult(
+                isWorthRemembering: true,
+                reason: reason,
+                suggestedTypes: [classification.primary.toMemoryType()]
+            )
+        } else {
+            return MemoryWorthinessResult(
+                isWorthRemembering: false,
+                reason: reason,
+                suggestedTypes: []
+            )
+        }
+    }
+    
+    // MARK: - Waypoint Creation
+    
+    private func createWaypointForNewMemory(memoryId: String, embedding: [Double], store: ExtractedMemoryStore) async {
+        do {
+            let existingMemories = try await store.fetchMemoriesWithEmbeddings()
+            
+            if let best = waypointManager.findBestWaypointTarget(
+                newMemoryId: memoryId,
+                newEmbedding: embedding,
+                existingMemories: existingMemories
+            ) {
+                let waypoint = waypointManager.createWaypoint(
+                    sourceId: memoryId,
+                    targetId: best.targetId,
+                    weight: best.similarity
+                )
+                try await store.saveWaypoint(waypoint)
+                print("[MemoryProcessor] 🔗 Created waypoint: \(memoryId) → \(best.targetId) (sim: \(String(format: "%.2f", best.similarity)))")
+            }
+        } catch {
+            print("[MemoryProcessor] Failed to create waypoint: \(error)")
+        }
+    }
+    
+    private func updateSegmentIfNeeded(store: ExtractedMemoryStore) async {
+        do {
+            let allMemories = try await store.fetchAllMemories()
+            let currentSegmentCount = allMemories.filter { $0.segment == currentSegment }.count
+            
+            if currentSegmentCount >= segmentSize {
+                currentSegment += 1
+                print("[MemoryProcessor] 📦 Rotated to segment \(currentSegment)")
+            }
+        } catch {
+            // Ignore segment rotation errors
+        }
     }
     
     /// Process all queued memories

@@ -48,9 +48,100 @@ struct ExtractedMemory: Identifiable, Codable, Hashable {
     /// Model used to generate embedding
     let embeddingModel: String?
     
+    // MARK: - OpenMemory-style Fields
+    
+    /// SimHash for fuzzy duplicate detection
+    var simhash: String?
+    
+    /// Memory sector (semantic, episodic, procedural, emotional, reflective)
+    var sector: String?
+    
+    /// Importance score with decay (0.0 - 1.0)
+    var salience: Double
+    
+    /// When this memory was last accessed/retrieved
+    var lastSeenAt: Date?
+    
+    /// Decay rate (sector-specific)
+    var decayLambda: Double
+    
+    /// Segment number for memory organization
+    var segment: Int
+    
+    // MARK: - Computed Properties
+    
     /// Convenience: does this memory have an embedding
     var hasEmbedding: Bool {
         embedding != nil && !(embedding?.isEmpty ?? true)
+    }
+    
+    /// Get the memory sector (parsed from string)
+    var memorySector: MemorySector {
+        if let sector = sector, let s = MemorySector(rawValue: sector) {
+            return s
+        }
+        return type.sector
+    }
+    
+    /// Calculate current salience with decay applied
+    var currentSalience: Double {
+        guard let lastSeen = lastSeenAt else { return salience }
+        return SalienceManager.shared.calculateDecayedSalience(
+            sector: memorySector,
+            initialSalience: salience,
+            lastSeenAt: lastSeen
+        )
+    }
+    
+    /// Calculate recency score for ranking
+    var recencyScore: Double {
+        let seenAt = lastSeenAt ?? createdAt
+        return SalienceManager.shared.calculateRecencyScore(lastSeenAt: seenAt)
+    }
+    
+    // MARK: - Initializers
+    
+    /// Full initializer with all OpenMemory fields
+    init(
+        id: String,
+        createdAt: Date,
+        content: String,
+        type: MemoryType,
+        confidence: Double,
+        tags: [String],
+        sourceMemoryId: String,
+        sourceApp: String,
+        isActive: Bool,
+        expiresAt: Date? = nil,
+        relatedMemoryIds: [String],
+        embedding: [Double]? = nil,
+        embeddingModel: String? = nil,
+        simhash: String? = nil,
+        sector: String? = nil,
+        salience: Double = 0.5,
+        lastSeenAt: Date? = nil,
+        decayLambda: Double = 0.02,
+        segment: Int = 0
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.content = content
+        self.type = type
+        self.confidence = confidence
+        self.tags = tags
+        self.sourceMemoryId = sourceMemoryId
+        self.sourceApp = sourceApp
+        self.isActive = isActive
+        self.expiresAt = expiresAt
+        self.relatedMemoryIds = relatedMemoryIds
+        self.embedding = embedding
+        self.embeddingModel = embeddingModel
+        self.simhash = simhash
+        self.sector = sector
+        self.salience = salience
+        self.lastSeenAt = lastSeenAt
+        self.decayLambda = decayLambda
+        self.segment = segment
     }
     
     // MARK: - Display Helpers

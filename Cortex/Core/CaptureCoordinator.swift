@@ -346,25 +346,39 @@ final class CaptureCoordinator: ObservableObject {
     }
     
     /// AI-first filtering: Check worthiness, extract memories, save only if worthy
+    /// NOW: Uses fast regex-based extraction when available, falls back to LLM
     private func captureWithAIFiltering(memory: Memory) async {
-        guard let processor = memoryProcessor, processor.isEnabled else {
-            // No AI available, fall back to heuristic
-            print("[CaptureCoordinator] AI not available, using fallback heuristic")
+        guard let processor = memoryProcessor else {
+            // No processor available, fall back to heuristic
+            print("[CaptureCoordinator] No processor available, using fallback heuristic")
             await fallbackHeuristicCapture(memory)
             return
         }
         
+        // Add to context window regardless of outcome (to track conversation flow)
+        contextWindow.addMessage(memory.text, appName: memory.appName)
+        
+        // NEW: Use fast extraction path (OpenMemory-style, no LLM needed)
+        if processor.useFastExtraction {
+            await captureWithFastExtraction(memory: memory, processor: processor)
+            return
+        }
+        
+        // Original LLM-based path
+        guard processor.isEnabled else {
+            print("[CaptureCoordinator] LLM not enabled, using fast extraction")
+            await captureWithFastExtraction(memory: memory, processor: processor)
+            return
+        }
+        
         do {
-            print("[CaptureCoordinator] 🧠 Checking if worth remembering: '\(memory.preview)'")
+            print("[CaptureCoordinator] 🧠 Checking if worth remembering (LLM): '\(memory.preview)'")
             
             // Get context for this app
             let context = contextWindow.getContext(for: memory.appName)
             
             // Stage 1: Check worthiness with context
             let worthiness = try await processor.checkWorthiness(memory, context: context)
-            
-            // Add to context window regardless of worthiness (to track conversation flow)
-            contextWindow.addMessage(memory.text, appName: memory.appName)
             
             if !worthiness.isWorthRemembering {
                 print("[CaptureCoordinator] ✗ Skipped (not worth remembering): \(worthiness.reason)")
@@ -421,9 +435,56 @@ final class CaptureCoordinator: ObservableObject {
             print("[CaptureCoordinator] ✓✓✓ Processed \(extracted.count) memories from \(memory.appName)")
             
         } catch {
-            print("[CaptureCoordinator] AI filtering failed: \(error)")
-            // Fallback to heuristic
-            await fallbackHeuristicCapture(memory)
+            print("[CaptureCoordinator] LLM filtering failed: \(error), falling back to fast extraction")
+            await captureWithFastExtraction(memory: memory, processor: processor)
+        }
+    }
+    
+    /// NEW: Fast extraction using OpenMemory-style regex + sentence scoring (no LLM)
+    private func captureWithFastExtraction(memory: Memory, processor: MemoryProcessor) async {
+        print("[CaptureCoordinator] ⚡ Fast extraction for: '\(memory.preview)'")
+        
+        // Use fast regex-based extraction
+        let result = await processor.processMemoryFast(memory)
+        
+        if !result.wasProcessed {
+            print("[CaptureCoordinator] ✗ Fast extraction skipped: \(result.processingNote ?? "unknown")")
+            
+            if let store = processor.extractedMemoryStore {
+                try? await store.logProcessing(
+                    rawMemoryId: memory.id,
+                    wasWorthRemembering: false,
+                    reason: result.processingNote,
+                    extractedCount: 0
+                )
+            }
+            return
+        }
+        
+        guard !result.memories.isEmpty else {
+            print("[CaptureCoordinator] ✗ No memories extracted")
+            return
+        }
+        
+        print("[CaptureCoordinator] ⚡ Fast extracted \(result.memories.count) memories")
+        
+        // Save extracted memories (with OpenMemory features: SimHash, salience, waypoints)
+        do {
+            try await processor.saveExtractedMemories(result.memories, sourceMemory: memory)
+            
+            // Reload extracted memories to update UI
+            AppState.shared.loadExtractedMemories()
+            
+            // Update UI state
+            await MainActor.run {
+                lastCapturedText = memory.preview
+                captureCount += 1
+            }
+            
+            print("[CaptureCoordinator] ⚡✓ Fast processed \(result.memories.count) memories from \(memory.appName)")
+            
+        } catch {
+            print("[CaptureCoordinator] Fast extraction save failed: \(error)")
         }
     }
     
