@@ -13,8 +13,9 @@ struct MemoryWindowView: View {
     @State private var navigationSelection: NavigationItem? = .memories
     @State private var searchText: String = ""
     
-    enum NavigationItem {
+    enum NavigationItem: Hashable {
         case memories
+        case graph
         case apps
     }
     
@@ -22,19 +23,28 @@ struct MemoryWindowView: View {
         NavigationSplitView {
             // SIDEBAR
             List(selection: $navigationSelection) {
-                Label("Memories", systemImage: "clock")
-                    .tag(NavigationItem.memories)
-                Label("Allowed Apps", systemImage: "checkmark.shield")
-                    .tag(NavigationItem.apps)
+                Section("Memory") {
+                    Label("List", systemImage: "list.bullet")
+                        .tag(NavigationItem.memories)
+                    Label("Graph", systemImage: "circle.grid.cross")
+                        .tag(NavigationItem.graph)
+                }
+                
+                Section("Settings") {
+                    Label("Allowed Apps", systemImage: "checkmark.shield")
+                        .tag(NavigationItem.apps)
+                }
             }
             .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 200, ideal: 250)
+            .navigationSplitViewColumnWidth(min: 180, ideal: 220)
         } detail: {
             // MAIN CONTENT (Right Side)
             if let selection = navigationSelection {
                 switch selection {
                 case .memories:
                     MemoriesContentView(appState: appState, searchText: $searchText)
+                case .graph:
+                    MemoryGraphView(appState: appState)
                 case .apps:
                     AppsView(appState: appState)
                 }
@@ -43,7 +53,7 @@ struct MemoryWindowView: View {
                     .foregroundColor(.secondary)
             }
         }
-        .frame(minWidth: 800, minHeight: 600)
+        .frame(minWidth: 900, minHeight: 650)
         .navigationTitle("Cortex")
     }
 }
