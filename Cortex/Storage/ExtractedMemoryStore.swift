@@ -297,7 +297,7 @@ final class ExtractedMemoryStore: @unchecked Sendable {
                 let sql = """
                 SELECT id, created_at, content, type, confidence, tags, source_memory_id, source_app, is_active, expires_at, related_memory_ids, embedding, embedding_model
                 FROM extracted_memories
-                WHERE LOWER(content) LIKE LOWER(?) AND is_active = 1
+                WHERE (LOWER(content) LIKE LOWER(?) OR LOWER(tags) LIKE LOWER(?)) AND is_active = 1
                 ORDER BY created_at DESC
                 """
                 
@@ -312,6 +312,7 @@ final class ExtractedMemoryStore: @unchecked Sendable {
                 
                 let searchPattern = "%\(query)%"
                 sqlite3_bind_text(statement, 1, (searchPattern as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(statement, 2, (searchPattern as NSString).utf8String, -1, nil)
                 
                 var memories: [ExtractedMemory] = []
                 
