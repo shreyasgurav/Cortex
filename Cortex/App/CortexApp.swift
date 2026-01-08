@@ -70,6 +70,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - App Lifecycle
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Load .env file first
+        EnvironmentLoader.load()
+        
         // Initialize core components
         setupComponents()
         

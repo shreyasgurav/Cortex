@@ -29,7 +29,8 @@ final class MemoryProcessor: ObservableObject {
     @Published var isEnabled: Bool = false
     
     /// Use fast (regex-based) extraction instead of LLM
-    @Published var useFastExtraction: Bool = true
+    /// Set to false to use LLM-based extraction (requires API key)
+    @Published var useFastExtraction: Bool = false
     
     // MARK: - Dependencies
     
